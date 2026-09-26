@@ -1,0 +1,6 @@
+{
+  "name": "inflotrack — Money In Out Tracker",
+  "description": "inflotrack — Track Save Grow. Personal income, expense, savings, and goals web application synced with Google Sheets and Google Drive.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

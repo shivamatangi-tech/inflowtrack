@@ -1,0 +1,195 @@
+{
+  "spreadsheetId": "sheet-inflowtrack-private",
+  "spreadsheetName": "inflowtrack",
+  "primaryOwnerUid": "3lncspQXV3aBhLQzrz5yCtcR0cm2",
+  "nextRowCounter": 3,
+  "transactions": [
+    {
+      "rowIndex": 2,
+      "sheetName": "SEP_2026",
+      "date": "2026-09-26",
+      "time": "21:29",
+      "type": "Income",
+      "category": "Salary",
+      "subcategory": "",
+      "amount": 1000,
+      "paymentMode": "HDFC Bank",
+      "account": "Primary Bank Account",
+      "description": "",
+      "uid": "3lncspQXV3aBhLQzrz5yCtcR0cm2",
+      "transactionId": "tx_1790438410144_c78fa227",
+      "createdAt": "2026-09-26T16:00:10.144Z",
+      "updatedAt": "2026-09-26T16:00:10.144Z"
+    }
+  ],
+  "userCategories": {
+    "3lncspQXV3aBhLQzrz5yCtcR0cm2": {
+      "uid": "3lncspQXV3aBhLQzrz5yCtcR0cm2",
+      "incomeCategories": [
+        "Salary",
+        "Freelance",
+        "Business",
+        "Bonus",
+        "Interest",
+        "Other Income"
+      ],
+      "expenseCategories": [
+        "Food",
+        "Groceries",
+        "Rent",
+        "Electricity",
+        "Water",
+        "Internet",
+        "Transport",
+        "Fuel",
+        "Shopping",
+        "Entertainment",
+        "Medical",
+        "Education",
+        "Bills",
+        "Other Expense"
+      ],
+      "transferCategories": [
+        "Bank to Bank Transfer",
+        "Wallet Top-up",
+        "Credit Card Bill Payment",
+        "Self Transfer",
+        "Cash Withdrawal"
+      ],
+      "savingsCategories": [
+        "Mutual Funds",
+        "Fixed Deposit",
+        "Recurring Deposit",
+        "Stocks & Equity",
+        "Gold & Precious Metals",
+        "PPF / EPF",
+        "Retirement Fund",
+        "Other Savings"
+      ],
+      "emergencyFundCategories": [
+        "Bank Liquid Reserve",
+        "Emergency High-Yield",
+        "Cash at Hand",
+        "Medical Contingency",
+        "Other Emergency Reserve"
+      ],
+      "lentCategories": [
+        "Money Lent to Friend",
+        "Personal Loan Given",
+        "Advance Given",
+        "Business Loan Given",
+        "Other Lent"
+      ],
+      "borrowedCategories": [
+        "Borrowed from Friend",
+        "Personal Loan Taken",
+        "Credit/Advance Taken",
+        "Bank Loan",
+        "Other Borrowed"
+      ],
+      "lentBorrowedCategories": [
+        "Lent to Friend / Family",
+        "Borrowed from Friend / Family",
+        "Personal Loan Advance",
+        "Loan Repayment Received",
+        "Loan Repayment Paid",
+        "Other Lent / Borrowed"
+      ],
+      "paymentModes": [
+        "HDFC Bank",
+        "Kotak 811",
+        "SBI Bank",
+        "HDFC Credit Card",
+        "SBI Credit Card",
+        "Tata Neu Credit Card",
+        "Amazon ICICI",
+        "UPI / GPay",
+        "Cash",
+        "Other Payment Mode"
+      ],
+      "accounts": [
+        "Primary Bank Account",
+        "Savings Account",
+        "Cash Wallet",
+        "Credit Card",
+        "UPI Wallet"
+      ],
+      "subcategories": {}
+    }
+  },
+  "userSecurity": {
+    "3lncspQXV3aBhLQzrz5yCtcR0cm2": {
+      "uid": "3lncspQXV3aBhLQzrz5yCtcR0cm2",
+      "pinEnabled": false,
+      "pinSaltedHash": "",
+      "question1": "What is your primary bank name or secret recovery keyword?",
+      "answer1SaltedHash": "",
+      "question2": "",
+      "answer2SaltedHash": "",
+      "inactivityTimeoutMinutes": 15,
+      "inactivityAction": "lock",
+      "failedAttempts": 0,
+      "updatedAt": "2026-09-26T15:59:35.784Z"
+    }
+  },
+  "userBudgets": {
+    "3lncspQXV3aBhLQzrz5yCtcR0cm2": {
+      "uid": "3lncspQXV3aBhLQzrz5yCtcR0cm2",
+      "savingsTarget": 1000000,
+      "emergencyFundTarget": 300000,
+      "monthlyExpenseBudget": 50000,
+      "updatedAt": "2026-09-26T16:51:52.763Z"
+    }
+  },
+  "recurringTemplates": [
+    {
+      "id": "rec-3lncsp-1",
+      "uid": "3lncspQXV3aBhLQzrz5yCtcR0cm2",
+      "name": "Monthly Salary",
+      "type": "Income",
+      "category": "Salary",
+      "subcategory": "Payroll",
+      "amount": 50000,
+      "paymentMode": "HDFC Bank",
+      "account": "Primary Bank Account",
+      "dayOfMonth": 1,
+      "description": "Monthly Salary Deposit",
+      "isActive": true,
+      "createdAt": "2026-09-26T16:51:36.628Z",
+      "updatedAt": "2026-09-26T16:51:36.628Z"
+    },
+    {
+      "id": "rec-3lncsp-2",
+      "uid": "3lncspQXV3aBhLQzrz5yCtcR0cm2",
+      "name": "House Rent",
+      "type": "Expense",
+      "category": "Rent",
+      "subcategory": "Housing",
+      "amount": 15000,
+      "paymentMode": "HDFC Bank",
+      "account": "Primary Bank Account",
+      "dayOfMonth": 5,
+      "description": "Monthly Apartment Rent",
+      "isActive": true,
+      "createdAt": "2026-09-26T16:51:36.628Z",
+      "updatedAt": "2026-09-26T16:51:36.628Z"
+    },
+    {
+      "id": "rec-3lncsp-3",
+      "uid": "3lncspQXV3aBhLQzrz5yCtcR0cm2",
+      "name": "Mutual Fund SIP",
+      "type": "Savings",
+      "category": "Mutual Funds",
+      "subcategory": "Index Fund SIP",
+      "amount": 5000,
+      "paymentMode": "HDFC Bank",
+      "account": "Savings Account",
+      "dayOfMonth": 10,
+      "description": "Auto-debit SIP Investment",
+      "isActive": true,
+      "createdAt": "2026-09-26T16:51:36.628Z",
+      "updatedAt": "2026-09-26T16:51:36.628Z"
+    }
+  ],
+  "driveBackups": []
+}

@@ -1,0 +1,45 @@
+<!doctype html>
+<!--
+  =============================================================================
+  File: index.html
+  Application: inflotrack — Track Save Grow
+  Purpose:
+    Main HTML entry point for the inflotrack standalone web application (PWA).
+    Configures responsive viewport settings, SEO/OpenGraph tags, Google Fonts,
+    PWA manifest link, and mounts the React application into #root.
+  =============================================================================
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>inflotrack — Track Save Grow</title>
+    <meta
+      name="description"
+      content="inflotrack — Track Save Grow. Personal income, expense, savings, and goals web application synced with Google Sheets and Google Drive."
+    />
+    <meta property="og:title" content="inflotrack — Track Save Grow" />
+    <meta
+      property="og:description"
+      content="inflotrack — Track Save Grow. Personal income, expense, savings, and goals web application synced with Google Sheets and Google Drive."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <meta name="theme-color" content="#4f46e5" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="inflotrack" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="manifest" href="/manifest.json" />
+  </head>
+  <body class="bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased font-sans">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

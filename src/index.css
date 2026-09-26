@@ -1,0 +1,58 @@
+/**
+ * ============================================================================
+ * File: src/index.css
+ * Application: inflotrack — Track Save Grow
+ * Purpose:
+ *   Global stylesheet for the inflotrack web application.
+ *
+ * Key Responsibilities:
+ *   1. Imports Tailwind CSS v4 and defines the custom dark-mode variant
+ *      triggered by the `.dark` class on the root `<html>` element.
+ *   2. Sets the default application typography ('Plus Jakarta Sans') and
+ *      web-app standalone interaction rules (smooth transitions, tap highlight
+ *      cleanup).
+ *   3. Styles sleek, unobtrusive scrollbars for both light and dark themes.
+ * ============================================================================
+ */
+
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    @apply transition-colors duration-200;
+  }
+}
+
+/* Smooth custom scrollbars for desktop & mobile tables */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.3);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.5);
+}
