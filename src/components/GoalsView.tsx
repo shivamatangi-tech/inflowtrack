@@ -34,7 +34,13 @@ import {
   ArrowUpRight,
   ArrowDownLeft,
   Sparkles,
+  Wifi,
+  CreditCard,
+  ArrowDown,
+  ArrowUp,
+  X,
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Transaction,
   TransactionType,
@@ -63,10 +69,22 @@ import {
   calculateCombinedCapitalPreservedProgress,
 } from '../utils/targets';
 import { ConfirmationDialog } from './ConfirmationDialog';
+import { TopUpWithdrawIconBadge } from '../utils/categoryIcons';
+import {
+  getAllVaultCards,
+  addCustomVaultCard,
+  removeCustomVaultCard,
+  getCardThemeClasses,
+  VaultCardItem,
+  CardThemeFinish,
+  CardNetwork,
+} from '../utils/customCards';
 
 interface GoalsViewProps {
   transactions: Transaction[];
-  onOpenAddGoal?: (type: TransactionType) => void;
+  userName?: string | null;
+  overallNetBalance?: number;
+  onOpenAddGoal?: (type: TransactionType, category?: string) => void;
   onDeleteTransaction?: (rowIndex: number) => Promise<void>;
   onDeleteTransactionsBatch?: (rowIndices: number[]) => Promise<void>;
   sheetUrl?: string;
@@ -75,6 +93,8 @@ interface GoalsViewProps {
 
 export const GoalsView: React.FC<GoalsViewProps> = ({
   transactions,
+  userName,
+  overallNetBalance = 0,
   onOpenAddGoal,
   onDeleteTransaction,
   onDeleteTransactionsBatch,
@@ -334,37 +354,683 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
   };
 
   const selectedCount = selectedRowIndices.size;
+  const cardHolder = (userName || 'INFLOTRACK MEMBER').toUpperCase();
+
+  // Interactive Swipeable Cards state
+  const [vaultCards, setVaultCards] = useState<VaultCardItem[]>(() => getAllVaultCards());
+  const [activeCardIndex, setActiveCardIndex] = useState<number>(0);
+  const [swipeDirection, setSwipeDirection] = useState<number>(1);
+  const [isAddCardOpen, setIsAddCardOpen] = useState<boolean>(false);
+
+  // Add New Card Form state
+  const [newCardName, setNewCardName] = useState('');
+  const [newCardLast4, setNewCardLast4] = useState('');
+  const [newCardExpiry, setNewCardExpiry] = useState('12/29');
+  const [newCardNetwork, setNewCardNetwork] = useState<CardNetwork>('VISA');
+  const [newCardTier, setNewCardTier] = useState('Signature');
+  const [newCardTheme, setNewCardTheme] = useState<CardThemeFinish>('obsidian');
+  const [addCardError, setAddCardError] = useState<string | null>(null);
+
+  const totalCards = vaultCards.length;
+  const safeActiveIndex = totalCards > 0 ? ((activeCardIndex % totalCards) + totalCards) % totalCards : 0;
+  const activeCard = vaultCards[safeActiveIndex] || vaultCards[0];
+  const prevCardIndex = totalCards > 1 ? (safeActiveIndex - 1 + totalCards) % totalCards : 0;
+  const nextCardIndex = totalCards > 1 ? (safeActiveIndex + 1) % totalCards : 0;
+  const prevCard = vaultCards[prevCardIndex];
+  const nextCard = vaultCards[nextCardIndex];
+
+  const handleNextCard = () => {
+    if (totalCards <= 1) return;
+    setSwipeDirection(1);
+    setActiveCardIndex((prev) => (prev + 1) % totalCards);
+  };
+
+  const handlePrevCard = () => {
+    if (totalCards <= 1) return;
+    setSwipeDirection(-1);
+    setActiveCardIndex((prev) => (prev - 1 + totalCards) % totalCards);
+  };
+
+  const handleSelectCardIndex = (idx: number) => {
+    if (idx === safeActiveIndex) return;
+    setSwipeDirection(idx > safeActiveIndex ? 1 : -1);
+    setActiveCardIndex(idx);
+  };
+
+  const handleAddCardSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddCardError(null);
+
+    const cleanName = newCardName.trim();
+    if (!cleanName) {
+      setAddCardError('Please enter a card or bank name.');
+      return;
+    }
+
+    const cleanLast4 = newCardLast4.replace(/\D/g, '').slice(-4).padStart(4, '8');
+    const cleanExpiry = newCardExpiry.trim() || '12/29';
+    const prefixMap: Record<CardNetwork, string> = {
+      VISA: '4532',
+      Mastercard: '5412',
+      RuPay: '6521',
+      AMEX: '3782',
+    };
+
+    const updated = addCustomVaultCard({
+      name: cleanName,
+      last4: cleanLast4,
+      prefix4: prefixMap[newCardNetwork] || '4532',
+      expiry: cleanExpiry,
+      network: newCardNetwork,
+      tier: newCardTier.trim() || 'Platinum',
+      theme: newCardTheme,
+    });
+
+    setVaultCards(updated);
+    setSwipeDirection(1);
+    setActiveCardIndex(updated.length - 1);
+    setNewCardName('');
+    setNewCardLast4('');
+    setNewCardExpiry('12/29');
+    setIsAddCardOpen(false);
+  };
+
+  const handleRemoveActiveCustomCard = () => {
+    if (!activeCard || activeCard.isDefault) return;
+    const updated = removeCustomVaultCard(activeCard.id);
+    setVaultCards(updated);
+    setActiveCardIndex(0);
+  };
+
+  // Compute activity breakdown by Payment Card / Mode (including user's custom cards)
+  const cardPaymentSummary = useMemo(() => {
+    const map = new Map<string, { spent: number; inflow: number; count: number }>();
+    vaultCards.forEach((c) => {
+      if (c.id !== 'card-vault-primary') {
+        map.set(c.name, { spent: 0, inflow: 0, count: 0 });
+      }
+    });
+    ['HDFC Bank', 'UPI / GPay'].forEach((c) => {
+      if (!map.has(c)) map.set(c, { spent: 0, inflow: 0, count: 0 });
+    });
+
+    transactions.forEach((tx) => {
+      const mode = (tx.paymentMode || tx.account || 'HDFC Bank').trim();
+      const entry = map.get(mode) || { spent: 0, inflow: 0, count: 0 };
+      if (tx.type === 'Income') {
+        entry.inflow += tx.amount;
+      } else if (tx.type === 'Expense') {
+        entry.spent += tx.amount;
+      }
+      entry.count += 1;
+      map.set(mode, entry);
+    });
+
+    return Array.from(map.entries())
+      .map(([name, data]) => ({ name, ...data }))
+      .sort((a, b) => b.spent + b.inflow - (a.spent + a.inflow))
+      .slice(0, 8);
+  }, [transactions, vaultCards]);
+
+  // Stats for currently focused card in the swipeable deck
+  const activeCardStats = useMemo(() => {
+    if (!activeCard || activeCard.id === 'card-vault-primary') {
+      return {
+        label: 'Available vault balance',
+        amount: overallNetBalance,
+        count: transactions.length,
+        isVault: true,
+      };
+    }
+    const targetName = activeCard.name.toLowerCase();
+    let spent = 0;
+    let inflow = 0;
+    let count = 0;
+    transactions.forEach((tx) => {
+      const mode = (tx.paymentMode || '').toLowerCase();
+      const acc = (tx.account || '').toLowerCase();
+      if (mode === targetName || acc === targetName) {
+        if (tx.type === 'Expense') spent += tx.amount;
+        if (tx.type === 'Income') inflow += tx.amount;
+        count += 1;
+      }
+    });
+    return {
+      label: `${activeCard.name} · Card Spend`,
+      amount: spent,
+      inflow,
+      count,
+      isVault: false,
+    };
+  }, [activeCard, overallNetBalance, transactions]);
+
+  const activeTheme = getCardThemeClasses(activeCard?.theme || 'obsidian');
+  const prevTheme = getCardThemeClasses(prevCard?.theme || 'platinum');
+  const nextTheme = getCardThemeClasses(nextCard?.theme || 'navy');
 
   return (
     <div id="goals-view-container" className="space-y-4 sm:space-y-5">
+      {/* 0. Interactive Swipeable Cards Section Hero + Linked Payment Cards Overview */}
+      <div
+        id="cards-section-showcase"
+        className="grid grid-cols-1 lg:grid-cols-12 gap-5"
+      >
+        {/* Left: Interactive Swipeable 3-Card Deck + Add Card Action */}
+        <div className="lg:col-span-5 bg-white dark:bg-[#161614] rounded-2xl p-4 sm:p-6 border border-[#E5E0D4] dark:border-[#282622] flex flex-col items-center justify-between transition-colors shadow-2xs min-w-0 overflow-hidden">
+          {/* Card Deck Top Header Bar */}
+          <div className="w-full flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div className="min-w-0">
+              <p className="text-[10px] font-medium tracking-[0.14em] uppercase text-[#8E7952] dark:text-[#C5A059] truncate">
+                Swipe or tap to switch · {safeActiveIndex + 1} of {totalCards}
+              </p>
+              <h2 className="font-display text-xl sm:text-2xl font-semibold text-[#141412] dark:text-[#F6F5F0] tracking-tight">
+                My Cards & Vault
+              </h2>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              {!activeCard?.isDefault && (
+                <button
+                  type="button"
+                  onClick={handleRemoveActiveCustomCard}
+                  title="Remove this custom card"
+                  className="min-h-[42px] min-w-[42px] p-2 rounded-xl border border-rose-200 dark:border-rose-900/50 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                type="button"
+                id="btn-open-add-card-modal"
+                onClick={() => {
+                  setAddCardError(null);
+                  setIsAddCardOpen(true);
+                }}
+                className="min-h-[42px] px-3.5 py-2 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs"
+              >
+                <Plus className="w-3.5 h-3.5 stroke-[2.5] shrink-0" />
+                <span>Add Card</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Interactive Swipeable 3-Card Stack (Fluid sizing for 320px -> 1920px) */}
+          <div className="relative w-full max-w-[356px] h-[196px] sm:h-[202px] flex items-center justify-center my-1 select-none overflow-hidden">
+            {/* Left Peeking Card (Click to switch to Previous Card) */}
+            {totalCards > 1 && prevCard && (
+              <div
+                onClick={handlePrevCard}
+                role="button"
+                tabIndex={-1}
+                aria-label={`Switch to ${prevCard.name}`}
+                className={`absolute left-1 sm:left-2 w-[min(62%,206px)] h-[140px] sm:h-[144px] rounded-2xl ${prevTheme.bg} ${prevTheme.text} p-3.5 sm:p-4 flex flex-col justify-between opacity-75 hover:opacity-95 -rotate-4 shadow-sm border ${prevTheme.border} transition-all cursor-pointer`}
+              >
+                <div className="text-[10px] font-medium truncate opacity-85">
+                  {prevCard.name}
+                </div>
+                <div className="text-[11px] tracking-widest tabular-nums opacity-85">
+                  {prevCard.prefix4} ••••
+                </div>
+              </div>
+            )}
+
+            {/* Right Peeking Card (Click to switch to Next Card) */}
+            {totalCards > 1 && nextCard && (
+              <div
+                onClick={handleNextCard}
+                role="button"
+                tabIndex={-1}
+                aria-label={`Switch to ${nextCard.name}`}
+                className={`absolute right-1 sm:right-2 w-[min(62%,206px)] h-[140px] sm:h-[144px] rounded-2xl ${nextTheme.bg} ${nextTheme.text} p-3.5 sm:p-4 flex flex-col justify-between opacity-80 hover:opacity-95 rotate-4 shadow-sm border ${nextTheme.border} transition-all cursor-pointer`}
+              >
+                <div className="flex justify-end">
+                  <Wifi className="w-3.5 h-3.5 opacity-70 rotate-90" />
+                </div>
+                <div className="text-right text-xs font-bold italic tracking-wider opacity-85">
+                  {nextCard.network}
+                </div>
+              </div>
+            )}
+
+            {/* Center Active Swipeable Card */}
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={activeCard.id}
+                drag="x"
+                dragConstraints={{ left: 0, right: 0 }}
+                dragElastic={0.45}
+                onDragEnd={(_, info) => {
+                  if (info.offset.x < -40 || info.velocity.x < -280) {
+                    handleNextCard();
+                  } else if (info.offset.x > 40 || info.velocity.x > 280) {
+                    handlePrevCard();
+                  }
+                }}
+                initial={{ opacity: 0, x: swipeDirection * 42, scale: 0.96 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, x: swipeDirection * -42, scale: 0.96 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className={`relative z-10 w-[min(86%,282px)] h-[166px] sm:h-[172px] rounded-2xl ${activeTheme.bg} ${activeTheme.text} p-4 sm:p-5 flex flex-col justify-between shadow-xl border ${activeTheme.border} overflow-hidden cursor-grab active:cursor-grabbing touch-pan-y`}
+              >
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute -right-10 -bottom-10 w-44 h-44 rounded-full bg-white/[0.06] blur-xl"
+                />
+
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-xs font-semibold tracking-tight truncate">
+                      ▲ {activeCard.name}
+                    </span>
+                  </div>
+                  <Wifi className="w-4 h-4 opacity-80 rotate-90 shrink-0" />
+                </div>
+
+                {/* Metallic Chip & Card Number */}
+                <div className="space-y-2 my-auto pt-1">
+                  <div
+                    className={`w-8 sm:w-9 h-5.5 sm:h-6 rounded-md bg-gradient-to-br ${activeTheme.chip} border border-white/25 opacity-90`}
+                  />
+                  <div className="text-[11px] sm:text-[13px] tracking-[0.15em] sm:tracking-[0.18em] font-medium tabular-nums truncate">
+                    {activeCard.prefix4} •••• •••• {activeCard.last4}
+                  </div>
+                </div>
+
+                {/* Expiry, Holder & Network Badge */}
+                <div className="flex items-end justify-between gap-2 pt-1">
+                  <div className="min-w-0">
+                    <div className={`text-[9px] ${activeTheme.subtext} tracking-wider`}>
+                      VALID {activeCard.expiry}
+                    </div>
+                    <div className="text-[10px] font-medium tracking-wider truncate max-w-[135px] sm:max-w-[145px] mt-0.5">
+                      {cardHolder}
+                    </div>
+                  </div>
+                  <div className="text-right leading-none shrink-0">
+                    <div className="text-sm sm:text-base font-bold italic tracking-wider">
+                      {activeCard.network}
+                    </div>
+                    <div className={`text-[8px] ${activeTheme.subtext} tracking-wide mt-0.5`}>
+                      {activeCard.tier}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            </AnimatePresence>
+          </div>
+
+          {/* Interactive Pagination Dots */}
+          <div className="flex items-center justify-center gap-1.5 my-2">
+            {vaultCards.map((c, idx) => {
+              const isCurrent = idx === safeActiveIndex;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => handleSelectCardIndex(idx)}
+                  aria-label={`View ${c.name}`}
+                  className={`h-2 rounded-full transition-all cursor-pointer ${
+                    isCurrent
+                      ? 'w-6 bg-[#C5A059]'
+                      : 'w-2 bg-[#D5D0C5] dark:bg-[#3A3832] hover:bg-[#8E7952]'
+                  }`}
+                />
+              );
+            })}
+          </div>
+
+          {/* Active Card Balance/Spend Readout & Quick Card Actions */}
+          <div className="w-full pt-3 border-t border-[#EFECE4] dark:border-[#24231F] flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] text-[#78746B] dark:text-[#9E9B92] truncate">
+                {activeCardStats.label}
+              </p>
+              <div className="font-display tabular-nums text-2xl font-semibold text-[#141412] dark:text-[#F6F5F0] tracking-tight">
+                {displayAmount(activeCardStats.amount)}
+              </div>
+              <p className="text-[10px] text-[#8E7952] dark:text-[#C5A059] tabular-nums">
+                {activeCardStats.count} {activeCardStats.count === 1 ? 'recorded entry' : 'recorded entries'}
+              </p>
+            </div>
+
+            {onOpenAddGoal && (
+              <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => onOpenAddGoal('Income', 'Salary')}
+                  className="flex flex-col items-center gap-1 cursor-pointer min-w-[44px]"
+                >
+                  <TopUpWithdrawIconBadge
+                    icon={<Plus className="w-3.5 h-3.5 stroke-[2.5]" />}
+                    shape="square"
+                    size="sm"
+                  />
+                  <span className="text-[10px] font-medium text-[#141412] dark:text-[#E6E4DD]">
+                    Top Up
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenAddGoal('Expense', 'Shopping')}
+                  className="flex flex-col items-center gap-1 cursor-pointer min-w-[44px]"
+                >
+                  <TopUpWithdrawIconBadge
+                    icon={<ArrowDown className="w-3.5 h-3.5 stroke-[2.5]" />}
+                    shape="circle"
+                    size="sm"
+                  />
+                  <span className="text-[10px] font-medium text-[#141412] dark:text-[#E6E4DD]">
+                    Spend
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenAddGoal('Transfer', 'Credit Card Bill Payment')}
+                  className="flex flex-col items-center gap-1 cursor-pointer min-w-[44px]"
+                >
+                  <TopUpWithdrawIconBadge
+                    icon={<ArrowUp className="w-3.5 h-3.5 stroke-[2.5]" />}
+                    shape="circle"
+                    size="sm"
+                  />
+                  <span className="text-[10px] font-medium text-[#141412] dark:text-[#E6E4DD]">
+                    Pay Bill
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Interactive Linked Payment Cards & Modes Breakdown */}
+        <div className="lg:col-span-7 bg-white dark:bg-[#161614] rounded-2xl p-4 sm:p-6 border border-[#E5E0D4] dark:border-[#282622] flex flex-col justify-between transition-colors shadow-2xs min-w-0">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div className="min-w-0">
+              <p className="text-[10px] font-medium tracking-[0.14em] uppercase text-[#8E7952] dark:text-[#C5A059]">
+                Interactive Card Selector
+              </p>
+              <h3 className="font-display text-xl sm:text-2xl font-semibold text-[#141412] dark:text-[#F6F5F0] tracking-tight">
+                Linked Payment Cards & Modes
+              </h3>
+              <p className="text-xs text-[#78746B] dark:text-[#9E9B92]">
+                Select any card below to focus it in the swipeable deck
+              </p>
+            </div>
+            <div className="flex flex-col min-[380px]:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  setAddCardError(null);
+                  setIsAddCardOpen(true);
+                }}
+                className="w-full sm:w-auto min-h-[42px] px-3.5 py-2 rounded-xl bg-[#F6F5F0] hover:bg-[#EFECE4] dark:bg-[#22211D] dark:hover:bg-[#2C2A25] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5 text-[#C5A059] shrink-0" />
+                <span>New Card</span>
+              </button>
+              {onOpenAddGoal && (
+                <button
+                  type="button"
+                  onClick={() => onOpenAddGoal('Transfer', 'Credit Card Bill Payment')}
+                  className="w-full sm:w-auto min-h-[42px] px-3.5 py-2 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-xs font-semibold text-[#F6F5F0] dark:text-[#111110] flex items-center justify-center transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Card Bill Payment
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {cardPaymentSummary.map((card) => {
+              const matchingDeckIdx = vaultCards.findIndex(
+                (vc) => vc.name.toLowerCase() === card.name.toLowerCase()
+              );
+              const isFocusedInDeck = matchingDeckIdx >= 0 && matchingDeckIdx === safeActiveIndex;
+
+              return (
+                <button
+                  key={card.name}
+                  type="button"
+                  onClick={() => {
+                    if (matchingDeckIdx >= 0) {
+                      handleSelectCardIndex(matchingDeckIdx);
+                    } else {
+                      const updated = addCustomVaultCard({
+                        name: card.name,
+                        last4: String(1000 + ((card.name.length * 731) % 8999)),
+                        prefix4: '4532',
+                        expiry: '10/29',
+                        network: 'VISA',
+                        tier: 'Platinum',
+                        theme: 'navy',
+                      });
+                      setVaultCards(updated);
+                      setSwipeDirection(1);
+                      setActiveCardIndex(updated.length - 1);
+                    }
+                  }}
+                  className={`p-3.5 rounded-2xl text-left flex items-center justify-between gap-3 transition-all cursor-pointer border ${
+                    isFocusedInDeck
+                      ? 'bg-[#F6F5F0] dark:bg-[#22211D] border-[#C5A059] ring-1 ring-[#C5A059]/40 shadow-2xs'
+                      : 'bg-[#F6F5F0]/60 dark:bg-[#1C1C19] border-[#E5E0D4] dark:border-[#282622] hover:border-[#C5A059]/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                        isFocusedInDeck
+                          ? 'bg-[#141412] dark:bg-[#C5A059] text-[#F6F5F0] dark:text-[#111110]'
+                          : 'bg-[#E5E0D4] dark:bg-[#282622] text-[#141412] dark:text-[#F6F5F0]'
+                      }`}
+                    >
+                      <CreditCard className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] truncate">
+                        {card.name}
+                      </div>
+                      <div className="text-[11px] text-[#78746B] dark:text-[#9E9B92] tabular-nums">
+                        {card.count} {card.count === 1 ? 'transaction' : 'transactions'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <div className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] tabular-nums">
+                      {displayAmount(card.spent)}
+                    </div>
+                    <div className="text-[10px] text-[#8E7952] dark:text-[#C5A059]">
+                      {isFocusedInDeck ? 'Active on Deck' : 'Spent'}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Add New Card Modal */}
+      {isAddCardOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
+          <div
+            id="add-vault-card-modal"
+            className="bg-white dark:bg-[#161614] rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 border border-[#E5E0D4] dark:border-[#282622] shadow-2xl relative"
+          >
+            <button
+              type="button"
+              onClick={() => setIsAddCardOpen(false)}
+              className="absolute top-3.5 right-3.5 w-9 h-9 rounded-full bg-[#F6F5F0] dark:bg-[#22211D] text-[#78746B] hover:text-[#141412] dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <p className="text-[10px] font-medium tracking-[0.16em] uppercase text-[#8E7952] dark:text-[#C5A059] pr-8">
+              Private Vault Configuration
+            </p>
+            <h3 className="font-display text-xl sm:text-2xl font-semibold text-[#141412] dark:text-[#F6F5F0] mt-0.5 mb-4 pr-8">
+              Add Card to Swipe Deck
+            </h3>
+
+            {addCardError && (
+              <div className="mb-3 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
+                {addCardError}
+              </div>
+            )}
+
+            <form onSubmit={handleAddCardSubmit} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                  Card or Bank Name
+                </label>
+                <input
+                  type="text"
+                  value={newCardName}
+                  onChange={(e) => setNewCardName(e.target.value)}
+                  placeholder="e.g., Axis Magnus, Amex Platinum, ICICI Sapphiro"
+                  className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                  autoFocus
+                />
+              </div>
+
+              <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                    Last 4 Digits
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={newCardLast4}
+                    onChange={(e) => setNewCardLast4(e.target.value.replace(/\D/g, ''))}
+                    placeholder="8842"
+                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium tabular-nums text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                    Valid Thru (MM/YY)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={5}
+                    value={newCardExpiry}
+                    onChange={(e) => setNewCardExpiry(e.target.value)}
+                    placeholder="12/29"
+                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium tabular-nums text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                    Card Network
+                  </label>
+                  <select
+                    value={newCardNetwork}
+                    onChange={(e) => setNewCardNetwork(e.target.value as CardNetwork)}
+                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059] cursor-pointer"
+                  >
+                    <option value="VISA">VISA</option>
+                    <option value="Mastercard">Mastercard</option>
+                    <option value="RuPay">RuPay</option>
+                    <option value="AMEX">AMEX</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                    Card Tier
+                  </label>
+                  <input
+                    type="text"
+                    value={newCardTier}
+                    onChange={(e) => setNewCardTier(e.target.value)}
+                    placeholder="Signature / Infinite"
+                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1.5">
+                  Card Finish
+                </label>
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                  {(
+                    [
+                      { id: 'obsidian', label: 'Obsidian', swatch: 'bg-[#191917]' },
+                      { id: 'champagne', label: 'Gold', swatch: 'bg-[#C5A059]' },
+                      { id: 'navy', label: 'Navy', swatch: 'bg-[#1E293B]' },
+                      { id: 'espresso', label: 'Espresso', swatch: 'bg-[#3B2A22]' },
+                      { id: 'platinum', label: 'Platinum', swatch: 'bg-[#CFCBC2]' },
+                    ] as const
+                  ).map((finish) => (
+                    <button
+                      key={finish.id}
+                      type="button"
+                      onClick={() => setNewCardTheme(finish.id)}
+                      className={`p-2 rounded-xl border flex flex-col items-center gap-1 text-[10px] font-medium transition-all cursor-pointer ${
+                        newCardTheme === finish.id
+                          ? 'border-[#C5A059] bg-[#F6F5F0] dark:bg-[#22211D] text-[#141412] dark:text-[#F6F5F0]'
+                          : 'border-[#E5E0D4] dark:border-[#282622] text-[#78746B] dark:text-[#9E9B92]'
+                      }`}
+                    >
+                      <span className={`w-5 h-5 rounded-full ${finish.swatch} border border-white/20`} />
+                      <span>{finish.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-2 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddCardOpen(false)}
+                  className="min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] hover:text-[#141412] dark:hover:text-white transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold transition-all cursor-pointer"
+                >
+                  Save Card to Deck
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* 1. Header with Timeframe Switcher & PIN Security Lock */}
-      <div className="bg-white dark:bg-slate-900 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 sm:gap-4 transition-colors">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+      <div className="bg-white dark:bg-[#161614] rounded-2xl border border-[#E5E0D4] dark:border-[#282622] shadow-2xs p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 sm:gap-4 transition-colors">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] text-[#8E7952] dark:text-[#C5A059] flex items-center justify-center shrink-0">
             <Target className="w-5 h-5" />
           </div>
-          <div>
-            <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+          <div className="min-w-0">
+            <h2 className="font-display text-xl sm:text-2xl font-semibold text-[#141412] dark:text-[#F6F5F0] tracking-tight">
               Goals & Reserves
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+            <p className="text-xs text-[#78746B] dark:text-[#9E9B92]">
               Target progress tracking for savings, emergency fund, lent & borrowed
             </p>
           </div>
         </div>
 
         {/* Timeframe Selector & Mode Sub-navigators */}
-        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 pt-0.5 lg:pt-0">
-          {/* Mode Pill: Month | Year | All-Time */}
-          <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold shrink-0">
+        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 sm:gap-2.5 pt-0.5 lg:pt-0 w-full lg:w-auto">
+          {/* Mode Segmented Control: Month | Year | All-Time */}
+          <div className="grid grid-cols-3 sm:flex bg-[#F0EDE5] dark:bg-[#22211D] p-1 rounded-xl text-xs font-medium w-full sm:w-auto">
             <button
               type="button"
               id="btn-goals-timeframe-month"
               onClick={() => setTimeframe('month')}
-              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+              className={`min-h-[38px] px-3 py-1.5 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
                 timeframe === 'month'
-                  ? 'bg-white dark:bg-slate-900 shadow-xs text-indigo-600 dark:text-indigo-400'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                  ? 'bg-white dark:bg-[#141412] shadow-2xs text-[#141412] dark:text-[#F6F5F0] font-semibold'
+                  : 'text-[#6E6A61] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-white'
               }`}
             >
               Month
@@ -373,10 +1039,10 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
               type="button"
               id="btn-goals-timeframe-year"
               onClick={() => setTimeframe('year')}
-              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+              className={`min-h-[38px] px-3 py-1.5 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
                 timeframe === 'year'
-                  ? 'bg-white dark:bg-slate-900 shadow-xs text-indigo-600 dark:text-indigo-400'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                  ? 'bg-white dark:bg-[#141412] shadow-2xs text-[#141412] dark:text-[#F6F5F0] font-semibold'
+                  : 'text-[#6E6A61] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-white'
               }`}
             >
               Year
@@ -385,10 +1051,10 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
               type="button"
               id="btn-goals-timeframe-alltime"
               onClick={() => setTimeframe('alltime')}
-              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+              className={`min-h-[38px] px-3 py-1.5 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
                 timeframe === 'alltime'
-                  ? 'bg-white dark:bg-slate-900 shadow-xs text-indigo-600 dark:text-indigo-400'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                  ? 'bg-white dark:bg-[#141412] shadow-2xs text-[#141412] dark:text-[#F6F5F0] font-semibold'
+                  : 'text-[#6E6A61] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-white'
               }`}
             >
               All-Time
@@ -716,23 +1382,23 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
             </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 w-full lg:w-auto">
             {/* Bulk Delete Selected Button */}
             {selectedCount > 0 && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between sm:justify-start gap-2">
                 <button
                   type="button"
                   id="btn-goals-delete-selected"
                   onClick={handleTriggerBulkDelete}
-                  className="py-1.5 px-3 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 transition-all cursor-pointer animate-fadeIn"
+                  className="min-h-[40px] py-1.5 px-3 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white text-xs font-bold rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
                 >
-                  <Trash2 className="w-3.5 h-3.5 stroke-[2.5]" />
+                  <Trash2 className="w-3.5 h-3.5 stroke-[2.5] shrink-0" />
                   <span>Delete Selected ({selectedCount})</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleClearSelection}
-                  className="py-1.5 px-2 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                  className="min-h-[40px] py-1.5 px-2 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors cursor-pointer"
                 >
                   Clear
                 </button>
@@ -740,15 +1406,15 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
             )}
 
             {/* Search */}
-            <div className="relative flex-1 sm:w-48">
-              <Search className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 absolute left-3 top-2 pointer-events-none" />
+            <div className="relative flex-1 sm:w-48 min-w-0">
+              <Search className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 absolute left-3 top-3 pointer-events-none" />
               <input
                 type="text"
                 id="goals-search-input"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search category, note..."
-                className="w-full pl-8 pr-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full min-h-[40px] pl-8 pr-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-[#C5A059]"
               />
             </div>
 
@@ -757,7 +1423,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
               id="goals-filter-type"
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
-              className="py-1.5 px-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              className="w-full sm:w-auto min-h-[40px] py-1.5 px-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-[#C5A059] cursor-pointer"
             >
               <option value="ALL">All Reserves & Goals</option>
               <option value="Savings">Savings Only</option>
@@ -773,10 +1439,10 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                 type="button"
                 id="btn-goals-add-entry"
                 onClick={() => onOpenAddGoal('Savings')}
-                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="w-full sm:w-auto min-h-[42px] px-3.5 py-2 bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
               >
-                <Plus className="w-3.5 h-3.5" />
-                + Add Goal Entry
+                <Plus className="w-3.5 h-3.5 shrink-0" />
+                <span>Add Goal Entry</span>
               </button>
             )}
           </div>

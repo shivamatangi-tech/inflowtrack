@@ -106,23 +106,28 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
   return (
     <div
       id="monthly-comparison-card"
-      className="bg-white dark:bg-[#1A1B19] rounded-3xl border border-[#E6E4DD] dark:border-[#2A2B28] p-5 sm:p-6 transition-colors flex flex-col justify-between h-full"
+      className="bg-white dark:bg-[#161614] rounded-2xl border border-[#E5E0D4] dark:border-[#282622] p-5 sm:p-6 transition-colors flex flex-col justify-between h-full shadow-2xs"
     >
       <div>
-        {/* Top Row: Analytics Title & 6M / 12M Pill */}
+        {/* Top Row: Analytics Title & 6M / 12M Selector */}
         <div className="flex items-center justify-between gap-3 mb-4">
-          <h3 className="text-lg font-semibold text-[#181816] dark:text-white tracking-tight">
-            Analytics
-          </h3>
+          <div>
+            <p className="text-[11px] font-medium tracking-[0.14em] text-[#8E7952] dark:text-[#C5A059]">
+              Comparative Performance
+            </p>
+            <h3 className="font-display text-2xl font-semibold text-[#141412] dark:text-[#F6F5F0] tracking-tight">
+              Monthly Cash-Flow Analytics
+            </h3>
+          </div>
 
-          <div className="flex items-center bg-[#EAE8E1] dark:bg-[#262724] p-1 rounded-full text-xs font-medium">
+          <div className="flex items-center bg-[#F6F5F0] dark:bg-[#22211D] p-1 rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium">
             <button
               type="button"
               onClick={() => setRangeMonths(6)}
-              className={`px-3 py-1 rounded-full transition-all cursor-pointer whitespace-nowrap ${
+              className={`px-3 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
                 rangeMonths === 6
-                  ? 'bg-white dark:bg-[#181816] text-[#181816] dark:text-white shadow-2xs'
-                  : 'text-[#6E6D68] dark:text-[#9E9C94]'
+                  ? 'bg-[#141412] dark:bg-[#C5A059] text-[#F6F5F0] dark:text-[#111110] shadow-2xs'
+                  : 'text-[#78746B] dark:text-[#9E9B92]'
               }`}
             >
               6M
@@ -130,10 +135,10 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
             <button
               type="button"
               onClick={() => setRangeMonths(12)}
-              className={`px-3 py-1 rounded-full transition-all cursor-pointer whitespace-nowrap ${
+              className={`px-3 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
                 rangeMonths === 12
-                  ? 'bg-white dark:bg-[#181816] text-[#181816] dark:text-white shadow-2xs'
-                  : 'text-[#6E6D68] dark:text-[#9E9C94]'
+                  ? 'bg-[#141412] dark:bg-[#C5A059] text-[#F6F5F0] dark:text-[#111110] shadow-2xs'
+                  : 'text-[#78746B] dark:text-[#9E9B92]'
               }`}
             >
               12M
@@ -141,8 +146,8 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
           </div>
         </div>
 
-        {/* Aurora-style Segmented Pill Bar: Overview | Expenses | Income */}
-        <div className="grid grid-cols-3 bg-[#EAE8E1] dark:bg-[#262724] p-1 rounded-full mb-5">
+        {/* Segmented Control: Overview | Expenses | Income */}
+        <div className="grid grid-cols-3 bg-[#F6F5F0] dark:bg-[#22211D] p-1 rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] mb-5">
           {(
             [
               { id: 'overview', label: 'Overview' },
@@ -154,10 +159,10 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
               key={tab.id}
               type="button"
               onClick={() => setActiveView(tab.id)}
-              className={`py-1.5 px-3 rounded-full text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
+              className={`py-1.5 px-3 rounded-lg text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
                 activeView === tab.id
-                  ? 'bg-white dark:bg-[#181816] text-[#181816] dark:text-white shadow-2xs'
-                  : 'text-[#6E6D68] dark:text-[#9E9C94] hover:text-[#181816] dark:hover:text-white'
+                  ? 'bg-white dark:bg-[#141412] text-[#141412] dark:text-[#F6F5F0] shadow-2xs'
+                  : 'text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-white'
               }`}
             >
               {tab.label}
@@ -168,35 +173,37 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
         {/* Big Metric Readout + vs Last Month */}
         <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
           <div>
-            <p className="text-xs text-[#8A8880] dark:text-[#9E9C94]">
+            <p className="text-xs text-[#78746B] dark:text-[#9E9B92]">
               {activeView === 'income'
                 ? 'Total income this month'
                 : 'Total spent this month'}
             </p>
-            <div className="tabular-nums text-2xl sm:text-3xl font-semibold text-[#181816] dark:text-white tracking-tight mt-0.5">
+            <div className="font-display tabular-nums text-3xl font-semibold text-[#141412] dark:text-[#F6F5F0] tracking-tight mt-0.5">
               {formatINR(activeHeadlineAmount)}
             </div>
           </div>
 
           <div className="flex items-center gap-1.5 text-xs">
-            <span className="px-2.5 py-0.5 rounded-full bg-[#EAE8E1] dark:bg-[#282926] text-[#181816] dark:text-[#E6E4DD] font-medium tabular-nums">
+            <span className="px-2.5 py-0.5 rounded-md bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-[#8E7952] dark:text-[#C5A059] font-medium tabular-nums">
               {deltaPercent <= 0 ? '↓' : '↑'} {Math.abs(deltaPercent)}%
             </span>
-            <span className="text-[#8A8880] dark:text-[#9E9C94]">vs prior month</span>
+            <span className="text-[#78746B] dark:text-[#9E9B92]">vs prior month</span>
           </div>
         </div>
       </div>
 
-      {/* Rounded Pill Bar Chart Container */}
+      {/* Bar Chart Container */}
       <div className="h-56 w-full">
         {data.length === 0 || (totalRangeIncome === 0 && totalRangeExpenses === 0) ? (
-          <div className="h-full flex items-center justify-center text-xs text-[#8A8880] dark:text-[#9E9C94] bg-[#F4F3EF]/60 dark:bg-[#141513] rounded-2xl">
+          <div className="h-full flex items-center justify-center text-xs text-[#78746B] dark:text-[#9E9B92] bg-[#F6F5F0]/60 dark:bg-[#121210] rounded-xl">
             No transaction records found for this period.
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={data}
+              accessibilityLayer={false}
+              style={{ outline: 'none' }}
               margin={{ top: 10, right: 6, left: -22, bottom: 0 }}
               barGap={6}
               onClick={(e: any) => {
@@ -226,26 +233,26 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
               />
               <Tooltip
                 content={<CustomTooltip />}
-                cursor={{ fill: 'rgba(234, 232, 225, 0.35)', radius: 12 }}
+                cursor={false}
               />
               {(activeView === 'overview' || activeView === 'income') && (
                 <Bar
                   dataKey="income"
                   name="Income"
-                  fill="#4A5240"
-                  radius={[14, 14, 8, 8]}
-                  maxBarSize={28}
-                  background={{ fill: '#F4F3EF', radius: 14 }}
+                  fill="#1E293B"
+                  radius={[8, 8, 4, 4]}
+                  maxBarSize={26}
+                  background={{ fill: '#F6F5F0', radius: 8 }}
                 />
               )}
               {(activeView === 'overview' || activeView === 'expenses') && (
                 <Bar
                   dataKey="expenses"
                   name="Expenses"
-                  fill="#8C7355"
-                  radius={[14, 14, 8, 8]}
-                  maxBarSize={28}
-                  background={{ fill: '#F4F3EF', radius: 14 }}
+                  fill="#C5A059"
+                  radius={[8, 8, 4, 4]}
+                  maxBarSize={26}
+                  background={{ fill: '#F6F5F0', radius: 8 }}
                 />
               )}
             </BarChart>
@@ -254,18 +261,18 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
       </div>
 
       {/* Legend & Footer */}
-      <div className="mt-3 pt-3 border-t border-[#F0EFEA] dark:border-[#262724] flex items-center justify-between text-xs text-[#8A8880] dark:text-[#9E9C94]">
+      <div className="mt-3 pt-3 border-t border-[#EFECE4] dark:border-[#24231F] flex items-center justify-between text-xs text-[#78746B] dark:text-[#9E9B92]">
         <div className="flex items-center gap-4">
           <span className="inline-flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#4A5240]" />
+            <span className="w-2.5 h-2.5 rounded-xs bg-[#1E293B]" />
             <span>Income</span>
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#8C7355]" />
+            <span className="w-2.5 h-2.5 rounded-xs bg-[#C5A059]" />
             <span>Expenses</span>
           </span>
         </div>
-        <span>Tap any bar to switch month</span>
+        <span>Select any bar to inspect month</span>
       </div>
     </div>
   );

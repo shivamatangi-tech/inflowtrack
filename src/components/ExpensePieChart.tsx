@@ -58,15 +58,20 @@ export const ExpensePieChart: React.FC<ExpensePieChartProps> = ({ data, monthLab
   return (
     <div
       id="expense-pie-chart-card"
-      className="bg-white dark:bg-[#1A1B19] rounded-3xl border border-[#E6E4DD] dark:border-[#2A2B28] flex flex-col justify-between p-5 sm:p-6 h-full transition-colors gap-4"
+      className="bg-white dark:bg-[#161614] rounded-2xl border border-[#E5E0D4] dark:border-[#282622] flex flex-col justify-between p-5 sm:p-6 h-full transition-colors gap-4 shadow-2xs"
     >
       <div>
-        {/* Card Header matching "Spending by category | See all" */}
+        {/* Card Header */}
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-[#181816] dark:text-white tracking-tight">
-            Spending by category
-          </h2>
-          <span className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94]">
+          <div>
+            <p className="text-[11px] font-medium tracking-[0.14em] text-[#8E7952] dark:text-[#C5A059]">
+              Category Allocation
+            </p>
+            <h2 className="font-display text-2xl font-semibold text-[#141412] dark:text-[#F6F5F0] tracking-tight">
+              Spending by Category
+            </h2>
+          </div>
+          <span className="text-xs font-medium text-[#78746B] dark:text-[#9E9B92]">
             {displayMonth}
           </span>
         </div>
@@ -87,9 +92,9 @@ export const ExpensePieChart: React.FC<ExpensePieChartProps> = ({ data, monthLab
           /* Side-by-side Donut + Legend Layout matching reference image */
           <div className="grid grid-cols-1 sm:grid-cols-12 items-center gap-4">
             {/* Left: Donut Chart with INR / Amount / Total in center */}
-            <div className="sm:col-span-5 h-[165px] w-full relative flex items-center justify-center">
+            <div className="sm:col-span-5 h-[165px] w-full relative flex items-center justify-center outline-none">
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
+                <PieChart accessibilityLayer={false} style={{ outline: 'none' }}>
                   <Pie
                     data={data}
                     dataKey="amount"
@@ -100,11 +105,16 @@ export const ExpensePieChart: React.FC<ExpensePieChartProps> = ({ data, monthLab
                     outerRadius={72}
                     paddingAngle={2}
                     stroke="currentColor"
-                    className="text-white dark:text-[#1A1B19]"
+                    className="text-white dark:text-[#161614] outline-none focus:outline-none"
                     strokeWidth={2}
+                    style={{ outline: 'none' }}
                   >
                     {data.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={entry.color}
+                        style={{ outline: 'none' }}
+                      />
                     ))}
                   </Pie>
                   <Tooltip

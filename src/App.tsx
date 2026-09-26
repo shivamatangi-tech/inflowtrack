@@ -144,6 +144,7 @@ export default function App() {
   const [activeMobileTab, setActiveMobileTab] = useState<MobileTab>('home');
   const [selectedDashboardMonth, setSelectedDashboardMonth] = useState<string>(getCurrentMonthKey());
   const [preSelectedType, setPreSelectedType] = useState<TransactionType>('Expense');
+  const [preSelectedCategory, setPreSelectedCategory] = useState<string>('');
   const [isDesktopSettingsOpen, setIsDesktopSettingsOpen] = useState<boolean>(false);
 
   // Initialize Firebase Auth Listener
@@ -460,8 +461,11 @@ export default function App() {
     setActiveMobileTab('add');
   };
 
-  const handleOpenAddGoal = (type: TransactionType) => {
+  const handleOpenAddGoal = (type: TransactionType, category?: string) => {
     setPreSelectedType(type);
+    if (category) {
+      setPreSelectedCategory(category);
+    }
     setActiveMobileTab('add');
     setActiveDesktopTab('dashboard');
   };
@@ -517,7 +521,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F4F3EF] dark:bg-[#111110] text-[#181816] dark:text-[#F4F3EF] flex flex-col font-sans antialiased transition-colors duration-150">
+    <div className="min-h-screen w-full max-w-[100vw] overflow-x-hidden bg-[#F6F5F0] dark:bg-[#111110] text-[#141412] dark:text-[#F6F5F0] flex flex-col font-sans antialiased transition-colors duration-150">
       {/* Top Header with Desktop Navigation Tabs */}
       <Header
         sheetInfo={sheetInfo}
@@ -528,6 +532,20 @@ export default function App() {
         onOpenSettings={() => {
           setIsDesktopSettingsOpen(true);
           setActiveMobileTab('settings');
+        }}
+        onOpenRecordEntry={() => {
+          setActiveDesktopTab('dashboard');
+          setActiveMobileTab('add');
+          setTimeout(() => {
+            const formEl = document.getElementById('add-transaction-form-card');
+            if (formEl) {
+              formEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            const amountInput = document.getElementById('tx-amount');
+            if (amountInput) {
+              amountInput.focus({ preventScroll: true });
+            }
+          }, 80);
         }}
         userEmail={currentUser.email}
         userPhoto={currentUser.photoURL}
@@ -634,7 +652,7 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-5 lg:p-6 mb-16 md:mb-6 flex flex-col gap-5">
+      <main className="flex-1 fluid-container py-4 sm:py-5 lg:py-6 mb-4 flex flex-col gap-5 min-w-0">
         {/* ========================================================================= */}
         {/* MOBILE VIEW (Screens controlled by mobile bottom navigation)              */}
         {/* ========================================================================= */}
@@ -656,15 +674,23 @@ export default function App() {
                   onMonthChange={setSelectedDashboardMonth}
                 />
 
-                {/* 1. Stacked Card + Total Balance + Circular Quick Actions + KPIs */}
+                {/* 1. Total Balance + KPIs */}
                 <SummaryCards
                   stats={stats}
                   overallNetBalance={overallStats.netBalance}
                   userName={currentUser.displayName || currentUser.email}
-                  onQuickAction={(type) => {
-                    setPreSelectedType(type);
+                  categories={categories}
+                  onOpenRecordTransaction={() => {
+                    setPreSelectedType('Expense');
+                    setPreSelectedCategory('');
                     setActiveMobileTab('add');
                   }}
+                  onQuickAction={(type, category) => {
+                    setPreSelectedType(type);
+                    setPreSelectedCategory(category || '');
+                    setActiveMobileTab('add');
+                  }}
+                  onOpenCardsSection={() => setActiveMobileTab('goals')}
                 />
 
                 {/* 4. Mobile Monthly Income vs Expenses Comparison Chart */}
@@ -706,6 +732,8 @@ export default function App() {
               >
                 <GoalsView
                   transactions={transactions}
+                  userName={currentUser.displayName || currentUser.email}
+                  overallNetBalance={overallStats.netBalance}
                   onOpenAddGoal={handleOpenAddGoal}
                   onDeleteTransaction={handleDeleteTransaction}
                   onDeleteTransactionsBatch={handleDeleteTransactionsBatch}
@@ -727,6 +755,7 @@ export default function App() {
                 <AddTransactionForm
                   categories={categories}
                   initialType={preSelectedType}
+                  initialCategory={preSelectedCategory}
                   onSave={handleSaveTransaction}
                   onSuccessCallback={() => {
                     setActiveMobileTab('home');
@@ -816,18 +845,33 @@ export default function App() {
                   onMonthChange={setSelectedDashboardMonth}
                 />
 
-                {/* Top Metric Cards: Stacked Card Hero, Circular Actions & KPIs */}
+                {/* Top Metric Cards: Total Balance & KPIs */}
                 <SummaryCards
                   stats={stats}
                   overallNetBalance={overallStats.netBalance}
                   userName={currentUser.displayName || currentUser.email}
-                  onQuickAction={(type) => {
+                  categories={categories}
+                  onOpenRecordTransaction={() => {
+                    setPreSelectedType('Expense');
+                    setPreSelectedCategory('');
+                    const formEl = document.getElementById('add-transaction-form-card');
+                    if (formEl) {
+                      formEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                    const amountInput = document.getElementById('tx-amount');
+                    if (amountInput) {
+                      amountInput.focus({ preventScroll: true });
+                    }
+                  }}
+                  onQuickAction={(type, category) => {
                     setPreSelectedType(type);
-                    const formEl = document.getElementById('add-transaction-card');
+                    setPreSelectedCategory(category || '');
+                    const formEl = document.getElementById('add-transaction-form-card');
                     if (formEl) {
                       formEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }
                   }}
+                  onOpenCardsSection={() => setActiveDesktopTab('goals')}
                 />
 
                 {/* Comparison & Category Breakdown Row */}
@@ -863,6 +907,7 @@ export default function App() {
                     <AddTransactionForm
                       categories={categories}
                       initialType={preSelectedType}
+                      initialCategory={preSelectedCategory}
                       onSave={handleSaveTransaction}
                     />
                   </div>
@@ -882,7 +927,7 @@ export default function App() {
                 />
               </motion.div>
             ) : (
-              /* DESKTOP GOALS VIEW */
+              /* DESKTOP CARDS & GOALS VIEW */
               <motion.div
                 key="desktop-goals"
                 initial={{ opacity: 0, y: 6 }}
@@ -892,6 +937,8 @@ export default function App() {
               >
                 <GoalsView
                   transactions={transactions}
+                  userName={currentUser.displayName || currentUser.email}
+                  overallNetBalance={overallStats.netBalance}
                   onOpenAddGoal={handleOpenAddGoal}
                   onDeleteTransaction={handleDeleteTransaction}
                   onDeleteTransactionsBatch={handleDeleteTransactionsBatch}
@@ -902,6 +949,87 @@ export default function App() {
           </AnimatePresence>
         </div>
       </main>
+
+      {/* Professional Multi-Column Executive Footer (Responsive on all screens) */}
+      <footer className="bg-[#111110] text-[#F6F5F0] border-t border-[#262521] mt-8 pb-24 md:pb-0">
+        <div className="fluid-container py-10 sm:py-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 text-xs">
+          <div className="space-y-3">
+            <div className="font-display text-2xl font-semibold tracking-tight text-[#F6F5F0]">
+              inflotrack
+            </div>
+            <p className="text-[#9E9B92] leading-relaxed">
+              Sovereign personal wealth architecture, cash-flow intelligence, and private Google Sheets & Drive synchronization.
+            </p>
+          </div>
+
+          <div className="space-y-2.5">
+            <h4 className="font-medium text-[#C5A059] tracking-wider uppercase text-[11px]">
+              Navigation
+            </h4>
+            <ul className="space-y-2 text-[#A39F95]">
+              <li>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveDesktopTab('dashboard');
+                    setActiveMobileTab('home');
+                  }}
+                  className="hover:text-[#F6F5F0] transition-colors cursor-pointer"
+                >
+                  Executive Cash-Flow Overview
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveDesktopTab('goals');
+                    setActiveMobileTab('goals');
+                  }}
+                  className="hover:text-[#F6F5F0] transition-colors cursor-pointer"
+                >
+                  Cards, Vault & Capital Reserves
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDesktopSettingsOpen(true);
+                    setActiveMobileTab('settings');
+                  }}
+                  className="hover:text-[#F6F5F0] transition-colors cursor-pointer"
+                >
+                  Workspace & PIN Security
+                </button>
+              </li>
+            </ul>
+          </div>
+
+          <div className="space-y-2.5">
+            <h4 className="font-medium text-[#C5A059] tracking-wider uppercase text-[11px]">
+              Sovereign Storage
+            </h4>
+            <ul className="space-y-2 text-[#A39F95]">
+              <li>Google Sheets Live Ledger</li>
+              <li>Google Drive Workbook Backup</li>
+              <li>4-Digit PIN Reserve Protection</li>
+            </ul>
+          </div>
+
+          <div className="space-y-2.5">
+            <h4 className="font-medium text-[#C5A059] tracking-wider uppercase text-[11px]">
+              Client Office
+            </h4>
+            <p className="text-[#A39F95] truncate">
+              {currentUser.email || 'Authenticated Private Session'}
+            </p>
+            <p className="text-[#78746B] text-[11px]">
+              © {new Date().getFullYear()} inflotrack. All rights reserved.
+            </p>
+          </div>
+        </div>
+      </footer>
 
       {/* Desktop Settings Modal */}
       {isDesktopSettingsOpen && (

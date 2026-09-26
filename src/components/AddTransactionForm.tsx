@@ -4,7 +4,9 @@
  * Application: inflotrack — Track Save Grow
  * Purpose:
  *   Transaction composer styled in the warm stone & matte obsidian aesthetic
- *   with Poppins typography and pill-segmented transaction types.
+ *   with Poppins typography and "Top Up / Withdraw" circular icon selectors
+ *   for Transaction Types, Income Categories, Expense Categories, and Other
+ *   Categories.
  * ============================================================================
  */
 
@@ -14,6 +16,7 @@ import {
   AlertCircle,
   Loader2,
   IndianRupee,
+  Plus,
 } from 'lucide-react';
 import { TransactionType, CategoryData } from '../types';
 import { getTodayDateString } from '../utils/formatters';
@@ -23,10 +26,17 @@ import {
   DEFAULT_TRANSFER_CATEGORIES,
   DEFAULT_ACCOUNTS,
 } from '../services/sheets';
+import {
+  getCategoryIcon,
+  getTransactionTypeIcon,
+  TopUpWithdrawIconBadge,
+} from '../utils/categoryIcons';
+import { getStoredCustomCards } from '../utils/customCards';
 
 interface AddTransactionFormProps {
   categories: CategoryData;
   initialType?: TransactionType;
+  initialCategory?: string;
   onSave: (transaction: {
     date: string;
     time?: string;
@@ -52,11 +62,12 @@ function getCurrentTimeHHMM(): string {
 export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
   categories,
   initialType = 'Expense',
+  initialCategory,
   onSave,
   onSuccessCallback,
 }) => {
   const [type, setType] = useState<TransactionType>(initialType);
-  const [category, setCategory] = useState<string>('');
+  const [category, setCategory] = useState<string>(initialCategory || '');
   const [customCategory, setCustomCategory] = useState<string>('');
   const [subcategory, setSubcategory] = useState<string>('');
   const [amount, setAmount] = useState<string>('');
@@ -107,20 +118,34 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
   }, [type, categories]);
 
   const paymentModesList = React.useMemo(() => {
-    return categories.paymentModes && categories.paymentModes.length > 0
-      ? categories.paymentModes
-      : [
-          'HDFC Bank',
-          'Kotak 811',
-          'SBI Bank',
-          'HDFC Credit Card',
-          'SBI Credit Card',
-          'Tata Neu Credit Card',
-          'Amazon ICICI',
-          'UPI / GPay',
-          'Cash',
-          'Other Payment Mode',
-        ];
+    const base =
+      categories.paymentModes && categories.paymentModes.length > 0
+        ? categories.paymentModes
+        : [
+            'HDFC Bank',
+            'Kotak 811',
+            'SBI Bank',
+            'HDFC Credit Card',
+            'SBI Credit Card',
+            'Tata Neu Credit Card',
+            'Amazon ICICI',
+            'UPI / GPay',
+            'Cash',
+            'Other Payment Mode',
+          ];
+    const customNames = getStoredCustomCards().map((c) => c.name);
+    const merged = [...base];
+    customNames.forEach((name) => {
+      if (!merged.some((m) => m.toLowerCase() === name.toLowerCase())) {
+        const otherIdx = merged.indexOf('Other Payment Mode');
+        if (otherIdx >= 0) {
+          merged.splice(otherIdx, 0, name);
+        } else {
+          merged.push(name);
+        }
+      }
+    });
+    return merged;
   }, [categories.paymentModes]);
 
   const accountsList = React.useMemo(() => {
@@ -136,15 +161,20 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
   }, [paymentModesList]);
 
   useEffect(() => {
+    if (initialCategory && currentCategoryList.includes(initialCategory)) {
+      setCategory(initialCategory);
+      setErrors({});
+      return;
+    }
     if (currentCategoryList.length > 0) {
-      if (!currentCategoryList.includes(category)) {
+      if (!currentCategoryList.includes(category) && category !== '__custom__') {
         setCategory(currentCategoryList[0]);
       }
     } else {
       setCategory('');
     }
     setErrors({});
-  }, [type, currentCategoryList]);
+  }, [type, currentCategoryList, initialCategory]);
 
   const validate = () => {
     const newErrors: { [key: string]: string } = {};
@@ -234,27 +264,35 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
   const typeOptions: Array<{
     key: 'Income' | 'Expense' | 'Transfer' | 'Savings' | 'Emergency Fund' | 'Lent' | 'Borrowed';
     label: string;
+    shape: 'square' | 'circle';
   }> = [
-    { key: 'Expense', label: 'Expense' },
-    { key: 'Income', label: 'Income' },
-    { key: 'Savings', label: 'Savings' },
-    { key: 'Emergency Fund', label: 'Emergency' },
-    { key: 'Transfer', label: 'Transfer' },
-    { key: 'Lent', label: 'Lent' },
-    { key: 'Borrowed', label: 'Borrowed' },
+    { key: 'Income', label: 'Income', shape: 'square' },
+    { key: 'Expense', label: 'Expenses', shape: 'circle' },
+    { key: 'Savings', label: 'Savings', shape: 'square' },
+    { key: 'Emergency Fund', label: 'Emergency', shape: 'circle' },
+    { key: 'Transfer', label: 'Transfer', shape: 'circle' },
+    { key: 'Lent', label: 'Lent', shape: 'square' },
+    { key: 'Borrowed', label: 'Borrowed', shape: 'circle' },
   ];
+
+  const categorySectionTitle =
+    type === 'Income'
+      ? 'Income categories'
+      : type === 'Expense'
+      ? 'Expense categories'
+      : `Other categories (${type})`;
 
   return (
     <div
       id="add-transaction-form-card"
-      className="bg-white dark:bg-[#1A1B19] rounded-3xl p-5 sm:p-6 border border-[#E6E4DD] dark:border-[#2A2B28] text-[#181816] dark:text-[#F4F3EF] flex flex-col justify-between transition-colors h-full"
+      className="bg-white dark:bg-[#161614] rounded-2xl p-4 sm:p-6 border border-[#E5E0D4] dark:border-[#282622] text-[#141412] dark:text-[#F6F5F0] flex flex-col justify-between transition-colors h-full min-w-0"
     >
       <div>
-        <div className="flex items-baseline justify-between mb-4">
-          <h2 className="text-base font-semibold text-[#181816] dark:text-white tracking-tight">
-            Record transaction
+        <div className="flex items-baseline justify-between gap-2 mb-4">
+          <h2 className="font-display text-xl sm:text-2xl font-semibold text-[#141412] dark:text-[#F6F5F0] tracking-tight">
+            Record Transaction
           </h2>
-          <span className="text-xs text-[#8A8880] dark:text-[#9E9C94]">
+          <span className="text-xs text-[#8A8880] dark:text-[#9E9C94] shrink-0">
             Synced to sheet
           </span>
         </div>
@@ -279,13 +317,13 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-3.5">
-          {/* 1. Soft Stone Segmented Type Bar */}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* 1. Top-Up / Withdraw Icon Type Bar (Horizontal Scroll) */}
           <div>
-            <label className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94] block mb-1.5">
+            <label className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94] block mb-2">
               Transaction type
             </label>
-            <div className="flex flex-wrap gap-1 p-1 bg-[#EAE8E1] dark:bg-[#262724] rounded-2xl">
+            <div className="flex items-center gap-3.5 overflow-x-auto py-2.5 px-3 bg-[#F4F3EF] dark:bg-[#222320] rounded-2xl border border-[#E6E4DD] dark:border-[#2A2B28] snap-x">
               {typeOptions.map((item) => {
                 const isSelected = type === item.key;
                 return (
@@ -294,13 +332,23 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
                     key={item.key}
                     id={`type-btn-${item.key.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
                     onClick={() => setType(item.key)}
-                    className={`flex-1 min-w-[70px] py-1.5 px-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
-                      isSelected
-                        ? 'bg-white dark:bg-[#181816] text-[#181816] dark:text-white shadow-2xs font-semibold'
-                        : 'text-[#6E6D68] dark:text-[#9E9C94] hover:text-[#181816] dark:hover:text-white'
-                    }`}
+                    className="flex flex-col items-center gap-1 cursor-pointer group shrink-0 snap-start min-w-[56px]"
                   >
-                    {item.label}
+                    <TopUpWithdrawIconBadge
+                      icon={getTransactionTypeIcon(item.key)}
+                      shape={item.shape}
+                      isSelected={isSelected}
+                      size="sm"
+                    />
+                    <span
+                      className={`text-[10px] whitespace-nowrap transition-colors ${
+                        isSelected
+                          ? 'font-semibold text-[#181816] dark:text-white'
+                          : 'font-medium text-[#6E6D68] dark:text-[#9E9C94]'
+                      }`}
+                    >
+                      {item.label}
+                    </span>
                   </button>
                 );
               })}
@@ -310,7 +358,108 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
             )}
           </div>
 
-          {/* 2. Amount & Payment Mode */}
+          {/* 2. Income / Expense / Other Categories in Top Up / Withdraw Circular Icon Style (Horizontal Scroll) */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label
+                htmlFor="tx-category"
+                className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94]"
+              >
+                {categorySectionTitle}
+              </label>
+              <span className="text-[11px] font-medium text-[#181816] dark:text-[#E6E4DD]">
+                {category === '__custom__' ? customCategory || 'Custom' : category}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3.5 overflow-x-auto py-2.5 px-3 bg-[#F4F3EF]/80 dark:bg-[#222320] rounded-2xl border border-[#E6E4DD] dark:border-[#2A2B28] snap-x">
+              {currentCategoryList.map((cat) => {
+                const isSelected = category === cat;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setCategory(cat)}
+                    className="flex flex-col items-center gap-1 cursor-pointer group shrink-0 snap-start min-w-[60px]"
+                  >
+                    <TopUpWithdrawIconBadge
+                      icon={getCategoryIcon(cat, type)}
+                      shape={type === 'Income' ? 'square' : 'circle'}
+                      isSelected={isSelected}
+                      size="sm"
+                    />
+                    <span
+                      className={`text-[10px] truncate max-w-[72px] text-center transition-colors whitespace-nowrap ${
+                        isSelected
+                          ? 'font-semibold text-[#181816] dark:text-white'
+                          : 'font-medium text-[#6E6D68] dark:text-[#9E9C94]'
+                      }`}
+                    >
+                      {cat}
+                    </span>
+                  </button>
+                );
+              })}
+
+              {/* + Custom Category Circular Icon Button */}
+              <button
+                type="button"
+                onClick={() => setCategory('__custom__')}
+                className="flex flex-col items-center gap-1 cursor-pointer group shrink-0 snap-start min-w-[60px]"
+              >
+                <TopUpWithdrawIconBadge
+                  icon={<Plus className="w-3.5 h-3.5 stroke-[2.5]" />}
+                  shape="square"
+                  isSelected={category === '__custom__'}
+                  size="sm"
+                />
+                <span
+                  className={`text-[10px] truncate max-w-[72px] text-center transition-colors whitespace-nowrap ${
+                    category === '__custom__'
+                      ? 'font-semibold text-[#181816] dark:text-white'
+                      : 'font-medium text-[#6E6D68] dark:text-[#9E9C94]'
+                  }`}
+                >
+                  Custom
+                </span>
+              </button>
+            </div>
+
+            {/* Accessible Select Synced with Icon Picker */}
+            <select
+              id="tx-category"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="sr-only"
+              aria-label="Category"
+            >
+              {currentCategoryList.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+              <option value="__custom__">+ Custom Category...</option>
+            </select>
+
+            {category === '__custom__' && (
+              <div className="mt-2">
+                <input
+                  type="text"
+                  id="tx-custom-category"
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value)}
+                  placeholder="Enter custom category name..."
+                  className="w-full px-3 py-2.5 bg-[#F4F3EF]/80 dark:bg-[#262724] border border-[#E6E4DD] dark:border-[#343531] rounded-2xl text-xs text-[#181816] dark:text-white placeholder-[#8A8880] focus:outline-none focus:border-[#4A5240]"
+                />
+              </div>
+            )}
+
+            {errors.category && (
+              <p className="text-xs text-rose-600 dark:text-rose-400 mt-1 font-medium">{errors.category}</p>
+            )}
+          </div>
+
+          {/* 3. Amount & Payment Mode */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label
@@ -390,65 +539,8 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
             </div>
           )}
 
-          {/* 3. Category & Account */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label
-                htmlFor="tx-category"
-                className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94] block mb-1.5"
-              >
-                Category
-              </label>
-              <select
-                id="tx-category"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className={`w-full px-3 py-2.5 bg-[#F4F3EF]/80 dark:bg-[#262724] border rounded-2xl text-xs font-medium text-[#181816] dark:text-white focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:border-[#4A5240] transition-all cursor-pointer ${
-                  errors.category
-                    ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/30'
-                    : 'border-[#E6E4DD] dark:border-[#343531]'
-                }`}
-              >
-                {currentCategoryList.length === 0 && (
-                  <option value="" className="text-[#8A8880]">
-                    No categories found
-                  </option>
-                )}
-                {currentCategoryList.map((cat) => (
-                  <option
-                    key={cat}
-                    value={cat}
-                    className="text-[#181816] dark:text-white bg-white dark:bg-[#1A1B19]"
-                  >
-                    {cat}
-                  </option>
-                ))}
-                <option
-                  value="__custom__"
-                  className="text-[#4A5240] dark:text-[#B8A38A] font-semibold bg-white dark:bg-[#1A1B19]"
-                >
-                  + Custom Category...
-                </option>
-              </select>
-
-              {category === '__custom__' && (
-                <div className="mt-2">
-                  <input
-                    type="text"
-                    id="tx-custom-category"
-                    value={customCategory}
-                    onChange={(e) => setCustomCategory(e.target.value)}
-                    placeholder="Enter category name..."
-                    className="w-full px-3 py-2.5 bg-[#F4F3EF]/80 dark:bg-[#262724] border border-[#E6E4DD] dark:border-[#343531] rounded-2xl text-xs text-[#181816] dark:text-white placeholder-[#8A8880] focus:outline-none focus:border-[#4A5240]"
-                  />
-                </div>
-              )}
-
-              {errors.category && (
-                <p className="text-xs text-rose-600 dark:text-rose-400 mt-1 font-medium">{errors.category}</p>
-              )}
-            </div>
-
+          {/* 4. Account, Date & Time */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label
                 htmlFor="tx-account"
@@ -469,10 +561,7 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
                 ))}
               </select>
             </div>
-          </div>
 
-          {/* 4. Date & Time */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label
                 htmlFor="tx-date"

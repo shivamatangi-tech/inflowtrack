@@ -75,59 +75,59 @@ export const DashboardMonthNav: React.FC<DashboardMonthNavProps> = ({
   return (
     <div
       id="dashboard-month-nav"
-      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-[#E5E0D4] dark:border-[#262521]"
     >
       {/* Left: Active Period Heading */}
       <div className="flex items-baseline gap-3">
         <h2
           id="current-dashboard-month-label"
-          className="text-xl sm:text-2xl font-semibold text-[#181816] dark:text-white tracking-tight"
+          className="font-display text-2xl sm:text-3xl font-semibold text-[#141412] dark:text-[#F6F5F0] tracking-tight"
         >
           {formatMonthYear(selectedMonth)}
         </h2>
-        <div className="flex items-center gap-1.5 text-xs text-[#8A8880] dark:text-[#9E9C94]">
-          <span>Analytics & Ledger</span>
+        <div className="flex items-center gap-1.5 text-xs text-[#78746B] dark:text-[#9E9B92]">
+          <span>Private Ledger Period</span>
           {!isCurrentMonth && (
             <>
               <span aria-hidden="true">·</span>
               <button
                 type="button"
                 onClick={() => onMonthChange(currentMonthKey)}
-                className="text-[#4A5240] dark:text-[#B8A38A] hover:underline font-medium cursor-pointer"
+                className="text-[#8E7952] dark:text-[#C5A059] hover:underline font-medium cursor-pointer"
               >
-                Current month
+                Return to current month
               </button>
             </>
           )}
         </div>
       </div>
 
-      {/* Right: Soft Stone Pill Selector */}
-      <div className="flex items-center gap-1 self-start sm:self-auto bg-[#EAE8E1] dark:bg-[#1C1D1B] p-1 rounded-full border border-[#E2DFD7] dark:border-[#2A2B28]">
+      {/* Right: Refined Period Selector */}
+      <div className="flex items-center justify-between sm:justify-start gap-1 w-full sm:w-auto bg-white dark:bg-[#161614] p-1 rounded-xl border border-[#E5E0D4] dark:border-[#282622] shadow-2xs">
         <button
           type="button"
           id="btn-dash-prev-month"
           onClick={handlePrev}
           title="Previous Month"
           aria-label="Previous Month"
-          className="w-8 h-8 flex items-center justify-center text-[#181816] dark:text-[#F4F3EF] hover:bg-white dark:hover:bg-[#2C2D2A] rounded-full transition-colors cursor-pointer"
+          className="w-10 h-10 sm:w-9 sm:h-9 flex items-center justify-center text-[#141412] dark:text-[#F6F5F0] hover:bg-[#F6F5F0] dark:hover:bg-[#24231F] rounded-lg transition-colors cursor-pointer shrink-0"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
 
-        <div className="flex items-center gap-1 bg-white dark:bg-[#2C2D2A] px-3 py-1 rounded-full shadow-2xs">
-          <Calendar className="w-3.5 h-3.5 text-[#8A8880] dark:text-[#9E9C94] shrink-0 mr-0.5" />
+        <div className="flex items-center justify-center gap-1.5 px-2 sm:px-3 py-1 min-w-0">
+          <Calendar className="w-3.5 h-3.5 text-[#C5A059] shrink-0 mr-0.5" />
           <select
             id="select-dash-month"
             value={monthStr}
             onChange={handleMonthSelect}
-            className="bg-transparent text-xs font-medium text-[#181816] dark:text-white focus:outline-none cursor-pointer"
+            className="bg-transparent text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none cursor-pointer"
           >
             {months.map((m) => (
               <option
                 key={m.num}
                 value={m.num}
-                className="bg-white dark:bg-[#1C1D1B] text-[#181816] dark:text-white"
+                className="bg-white dark:bg-[#161614] text-[#141412] dark:text-[#F6F5F0]"
               >
                 {m.name}
               </option>
@@ -142,13 +142,13 @@ export const DashboardMonthNav: React.FC<DashboardMonthNavProps> = ({
             id="select-dash-year"
             value={yearStr}
             onChange={handleYearSelect}
-            className="bg-transparent tabular-nums text-xs font-medium text-[#181816] dark:text-white focus:outline-none cursor-pointer"
+            className="bg-transparent tabular-nums text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none cursor-pointer"
           >
             {years.map((y) => (
               <option
                 key={y}
                 value={String(y)}
-                className="bg-white dark:bg-[#1C1D1B] text-[#181816] dark:text-white"
+                className="bg-white dark:bg-[#161614] text-[#141412] dark:text-[#F6F5F0]"
               >
                 {y}
               </option>
@@ -162,7 +162,7 @@ export const DashboardMonthNav: React.FC<DashboardMonthNavProps> = ({
           onClick={handleNext}
           title="Next Month"
           aria-label="Next Month"
-          className="w-8 h-8 flex items-center justify-center text-[#181816] dark:text-[#F4F3EF] hover:bg-white dark:hover:bg-[#2C2D2A] rounded-full transition-colors cursor-pointer"
+          className="w-10 h-10 sm:w-9 sm:h-9 flex items-center justify-center text-[#141412] dark:text-[#F6F5F0] hover:bg-[#F6F5F0] dark:hover:bg-[#24231F] rounded-lg transition-colors cursor-pointer shrink-0"
         >
           <ChevronRight className="w-4 h-4" />
         </button>

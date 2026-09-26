@@ -365,28 +365,28 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
       id="recent-activity-card"
       className="bg-white dark:bg-[#181816] rounded-[28px] border border-[#E2DFD9] dark:border-[#2A2A27] overflow-hidden flex flex-col transition-colors shadow-xs"
     >
-      {/* 1. Header with "Transactions" Title and Action Pills */}
-      <div className="px-5 sm:px-6 py-5 border-b border-[#EFECE6] dark:border-[#22221F] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      {/* 1. Header with "Transactions" Title and Responsive Action Buttons */}
+      <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-[#EFECE6] dark:border-[#22221F] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center justify-between sm:justify-start gap-3">
-          <h3 className="text-base sm:text-lg font-semibold text-[#181816] dark:text-[#F4F3EF] tracking-tight">
+          <h3 className="font-display text-xl sm:text-2xl font-semibold text-[#181816] dark:text-[#F4F3EF] tracking-tight">
             Transactions
           </h3>
-          <span className="text-xs font-medium text-[#8C8980] dark:text-[#78756E] px-2.5 py-0.5 rounded-full bg-[#F4F3EF] dark:bg-[#22221F] tabular-nums">
+          <span className="text-xs font-medium text-[#8C8980] dark:text-[#78756E] tabular-nums">
             {scopedTransactions.length} {scopedTransactions.length === 1 ? 'item' : 'items'}
           </span>
         </div>
 
-        {/* Quick Action Tools: Recurring Manager, Store & Download Sheet */}
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Quick Action Tools: Responsive stack/grid on small mobile, row on tablet/desktop */}
+        <div className="grid grid-cols-1 min-[380px]:grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto">
           {onApplyRecurring && (
             <button
               type="button"
               id="btn-recurring-manager"
               onClick={() => setIsRecurringOpen(true)}
-              className="py-2 px-3.5 bg-[#F4F3EF] dark:bg-[#22221F] hover:bg-[#E5E2DC] dark:hover:bg-[#2C2C28] rounded-full text-xs font-medium text-[#181816] dark:text-[#F4F3EF] flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+              className="min-h-[42px] py-2 px-3.5 bg-[#F4F3EF] dark:bg-[#22221F] hover:bg-[#E5E2DC] dark:hover:bg-[#2C2C28] rounded-xl text-xs font-medium text-[#181816] dark:text-[#F4F3EF] flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
             >
-              <Repeat className="w-3.5 h-3.5 text-[#78756E]" />
-              Recurring
+              <Repeat className="w-3.5 h-3.5 text-[#78756E] shrink-0" />
+              <span>Recurring</span>
             </button>
           )}
 
@@ -402,10 +402,10 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
             }}
             disabled={isDownloadingSheet}
             title="Store in Google Drive folder (1WTHHDzwzO79ypcP06ZmDkBuDADosnH30) and download inflowtrack sheet"
-            className="py-2 px-4 bg-[#181816] hover:bg-[#2A2A26] dark:bg-[#F4F3EF] dark:hover:bg-[#E5E2DC] text-white dark:text-[#181816] rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+            className="min-h-[42px] py-2 px-4 bg-[#181816] hover:bg-[#2A2A26] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-white dark:text-[#111110] rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
           >
-            <Download className="w-3.5 h-3.5" />
-            {isDownloadingSheet ? 'Exporting...' : 'Download Sheet'}
+            <Download className="w-3.5 h-3.5 shrink-0" />
+            <span>{isDownloadingSheet ? 'Exporting...' : 'Download Sheet'}</span>
           </button>
 
           <button
@@ -414,24 +414,24 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
             onClick={handleExportCSV}
             disabled={filteredTransactions.length === 0}
             title="Download filtered view as CSV"
-            className="py-2 px-3.5 bg-[#F4F3EF] dark:bg-[#22221F] hover:bg-[#E5E2DC] dark:hover:bg-[#2C2C28] rounded-full text-xs font-medium text-[#181816] dark:text-[#F4F3EF] flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 whitespace-nowrap"
+            className="min-h-[42px] min-[380px]:col-span-2 sm:col-span-1 py-2 px-3.5 bg-[#F4F3EF] dark:bg-[#22221F] hover:bg-[#E5E2DC] dark:hover:bg-[#2C2C28] rounded-xl text-xs font-medium text-[#181816] dark:text-[#F4F3EF] flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 whitespace-nowrap"
           >
-            <Download className="w-3.5 h-3.5 text-[#78756E]" />
-            Export CSV
+            <Download className="w-3.5 h-3.5 text-[#78756E] shrink-0" />
+            <span>Export CSV</span>
           </button>
         </div>
       </div>
 
       {actionError && (
-        <div className="px-5 py-2.5 bg-rose-50 dark:bg-rose-950/60 border-b border-rose-200 dark:border-rose-800 flex items-center justify-between text-xs font-medium text-rose-700 dark:text-rose-300">
-          <div className="flex items-center gap-2">
+        <div className="px-4 sm:px-5 py-2.5 bg-rose-50 dark:bg-rose-950/60 border-b border-rose-200 dark:border-rose-800 flex items-center justify-between gap-2 text-xs font-medium text-rose-700 dark:text-rose-300">
+          <div className="flex items-center gap-2 min-w-0">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{actionError}</span>
+            <span className=" break-words">{actionError}</span>
           </div>
           <button
             type="button"
             onClick={() => setActionError(null)}
-            className="p-0.5 text-rose-500 hover:text-rose-700 cursor-pointer"
+            className="p-1 text-rose-500 hover:text-rose-700 cursor-pointer shrink-0"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -439,18 +439,18 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
       )}
 
       {/* 2. Search, Category Filter, and Selection Bar */}
-      <div className="px-5 sm:px-6 py-3.5 border-b border-[#EFECE6] dark:border-[#22221F] flex flex-wrap items-center justify-between gap-2.5">
-        <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[240px]">
+      <div className="px-4 sm:px-6 py-3.5 border-b border-[#EFECE6] dark:border-[#22221F] flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 min-w-0 w-full">
           {/* Search box */}
-          <div className="relative flex-1 max-w-sm">
-            <Search className="w-4 h-4 text-[#8C8980] absolute left-3.5 top-2.5 pointer-events-none" />
+          <div className="relative flex-1 sm:max-w-sm min-w-0">
+            <Search className="w-4 h-4 text-[#8C8980] absolute left-3.5 top-3 pointer-events-none" />
             <input
               type="text"
               id="recent-search-input"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search category, description, or wallet..."
-              className="w-full pl-9 pr-8 py-2 bg-[#F4F3EF] dark:bg-[#22221F] border border-[#E2DFD9] dark:border-[#2E2E2A] rounded-full text-xs text-[#181816] dark:text-[#F4F3EF] placeholder-[#8C8980] focus:outline-none focus:ring-2 focus:ring-[#4A5240] transition-all"
+              className="w-full min-h-[42px] pl-9 pr-8 py-2 bg-[#F4F3EF] dark:bg-[#22221F] border border-[#E2DFD9] dark:border-[#2E2E2A] rounded-xl text-xs text-[#181816] dark:text-[#F4F3EF] placeholder-[#8C8980] focus:outline-none focus:border-[#C5A059] transition-all"
             />
             {searchTerm && (
               <button
@@ -458,7 +458,7 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
                 id="btn-clear-search"
                 onClick={() => setSearchTerm('')}
                 title="Clear search"
-                className="absolute right-2.5 top-2 p-0.5 text-[#8C8980] hover:text-[#181816] dark:hover:text-white rounded-full transition-colors cursor-pointer"
+                className="absolute right-2.5 top-2.5 p-1 text-[#8C8980] hover:text-[#181816] dark:hover:text-white rounded-full transition-colors cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -466,15 +466,15 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
           </div>
 
           {/* Category Filter Dropdown */}
-          <div className="flex items-center gap-1.5">
-            <Filter className="w-3.5 h-3.5 text-[#8C8980]" />
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Filter className="w-3.5 h-3.5 text-[#8C8980] shrink-0 hidden sm:inline" />
             <select
               id="recent-category-filter"
               value={selectedCategoryFilter}
               onChange={(e) => setSelectedCategoryFilter(e.target.value)}
-              className="py-2 px-3.5 bg-[#F4F3EF] dark:bg-[#22221F] border border-[#E2DFD9] dark:border-[#2E2E2A] rounded-full text-xs font-medium text-[#181816] dark:text-[#F4F3EF] focus:outline-none focus:ring-2 focus:ring-[#4A5240] cursor-pointer"
+              className="w-full sm:w-auto min-h-[42px] py-2 px-3.5 bg-[#F4F3EF] dark:bg-[#22221F] border border-[#E2DFD9] dark:border-[#2E2E2A] rounded-xl text-xs font-medium text-[#181816] dark:text-[#F4F3EF] focus:outline-none focus:border-[#C5A059] cursor-pointer"
             >
-              <option value="ALL">View all</option>
+              <option value="ALL">All Categories</option>
               {availableFilterCategories.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -485,7 +485,7 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
 
           {/* Real-time Match Indicator */}
           {(searchTerm || selectedCategoryFilter !== 'ALL') && (
-            <span className="text-[11px] font-medium text-[#4A5240] dark:text-[#A3B18A] bg-[#F4F3EF] dark:bg-[#22221F] px-3 py-1 rounded-full">
+            <span className="text-[11px] font-medium text-[#4A5240] dark:text-[#A3B18A] px-1">
               {filteredTransactions.length} of {scopedTransactions.length}{' '}
               {filteredTransactions.length === 1 ? 'match' : 'matches'}
             </span>
@@ -494,20 +494,20 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
 
         {/* Bulk Action Controls */}
         {selectedCount > 0 && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto pt-1 sm:pt-0">
             <button
               type="button"
               id="btn-delete-selected-transactions"
               onClick={handleTriggerBulkDelete}
-              className="py-1.5 px-3.5 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white text-xs font-medium rounded-full shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              className="min-h-[40px] py-1.5 px-3.5 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white text-xs font-medium rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Trash2 className="w-3.5 h-3.5 shrink-0" />
               <span>Delete Selected ({selectedCount})</span>
             </button>
             <button
               type="button"
               onClick={handleClearSelection}
-              className="py-1.5 px-2 text-xs font-medium text-[#78756E] hover:text-[#181816] dark:hover:text-white transition-colors cursor-pointer"
+              className="min-h-[40px] py-1.5 px-2.5 text-xs font-medium text-[#78756E] hover:text-[#181816] dark:hover:text-white transition-colors cursor-pointer"
             >
               Clear
             </button>
@@ -747,7 +747,7 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
             </table>
           </div>
 
-          {/* Mobile List View styled after the Aurora "Transactions" screen */}
+          {/* Mobile List View optimized for 320px -> 414px screens */}
           <div className="md:hidden divide-y divide-[#F2EFE9] dark:divide-[#22221F]">
             {filteredTransactions.map((tx) => {
               const style = getTypeStyle(tx.type);
@@ -757,7 +757,7 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
               return (
                 <div
                   key={tx.id || `${tx.date}-${tx.amount}-${tx.rowIndex}`}
-                  className={`px-4 py-3.5 flex items-center justify-between gap-3 transition-colors ${
+                  className={`px-3.5 sm:px-4 py-3.5 flex items-center justify-between gap-2.5 transition-colors ${
                     isSelected
                       ? 'bg-[#F4F3EF] dark:bg-[#262622]'
                       : 'hover:bg-[#FAF9F6] dark:hover:bg-[#1E1E1B]'
@@ -779,7 +779,7 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
 
                   {/* Stone Icon Badge */}
                   <div
-                    className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${style.iconBg}`}
+                    className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center shrink-0 ${style.iconBg}`}
                   >
                     {style.icon}
                   </div>
@@ -802,20 +802,20 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
                   </div>
 
                   {/* Right Amount + Actions */}
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex flex-col items-end gap-1 shrink-0">
                     <div
-                      className={`tabular-nums font-semibold text-sm text-right ${style.amountColor}`}
+                      className={`tabular-nums font-semibold text-xs sm:text-sm text-right whitespace-nowrap ${style.amountColor}`}
                     >
                       {style.sign}
                       {formatINR(tx.amount)}
                     </div>
 
-                    <div className="flex items-center">
+                    <div className="flex items-center gap-0.5">
                       <button
                         type="button"
                         onClick={() => setEditingTransaction(tx)}
                         title="Modify Record"
-                        className="p-1.5 text-[#8C8980] hover:text-[#181816] dark:hover:text-white rounded-full"
+                        className="p-1.5 text-[#8C8980] hover:text-[#181816] dark:hover:text-white rounded-lg cursor-pointer"
                       >
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
@@ -825,7 +825,7 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
                           type="button"
                           onClick={() => handleTriggerSingleDelete(tx)}
                           title="Delete Record"
-                          className="p-1.5 text-[#8C8980] hover:text-rose-600 rounded-full"
+                          className="p-1.5 text-[#8C8980] hover:text-rose-600 rounded-lg cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

@@ -86,28 +86,31 @@ export const TrendLineChart: React.FC<TrendLineChartProps> = ({
   return (
     <div
       id="trend-line-chart-card"
-      className="bg-white dark:bg-[#1A1B19] rounded-3xl border border-[#E6E4DD] dark:border-[#2A2B28] flex flex-col p-5 sm:p-6 h-full transition-colors"
+      className="bg-white dark:bg-[#161614] rounded-2xl border border-[#E5E0D4] dark:border-[#282622] flex flex-col p-5 sm:p-6 h-full transition-colors shadow-2xs"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 mb-5">
         <div>
-          <h2 className="text-base font-semibold text-[#181816] dark:text-white tracking-tight">
-            Cashflow trajectory
+          <p className="text-[11px] font-medium tracking-[0.14em] text-[#8E7952] dark:text-[#C5A059]">
+            Temporal Velocity
+          </p>
+          <h2 className="font-display text-2xl font-semibold text-[#141412] dark:text-[#F6F5F0] tracking-tight">
+            Cash-Flow Trajectory
           </h2>
-          <p className="text-xs text-[#8A8880] dark:text-[#9E9C94] mt-0.5">
+          <p className="text-xs text-[#78746B] dark:text-[#9E9B92] mt-0.5">
             {mode === 'daily' ? 'Daily activity for selected month' : 'Monthly historical trajectory'}
           </p>
         </div>
 
-        {/* Daily / Monthly Soft Stone Segmented Pill */}
-        <div className="flex bg-[#EAE8E1] dark:bg-[#262724] p-1 rounded-full text-xs font-medium">
+        {/* Daily / Monthly Segmented Selector */}
+        <div className="flex bg-[#F6F5F0] dark:bg-[#22211D] p-1 rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium">
           <button
             type="button"
             id="trend-toggle-daily"
             onClick={() => setMode('daily')}
-            className={`px-3.5 py-1 rounded-full transition-all cursor-pointer whitespace-nowrap ${
+            className={`px-3.5 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
               mode === 'daily'
-                ? 'bg-white dark:bg-[#181816] shadow-2xs text-[#181816] dark:text-white'
-                : 'text-[#6E6D68] dark:text-[#9E9C94] hover:text-[#181816] dark:hover:text-white'
+                ? 'bg-[#141412] dark:bg-[#C5A059] shadow-2xs text-[#F6F5F0] dark:text-[#111110]'
+                : 'text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-white'
             }`}
           >
             Daily
@@ -116,10 +119,10 @@ export const TrendLineChart: React.FC<TrendLineChartProps> = ({
             type="button"
             id="trend-toggle-monthly"
             onClick={() => setMode('monthly')}
-            className={`px-3.5 py-1 rounded-full transition-all cursor-pointer whitespace-nowrap ${
+            className={`px-3.5 py-1 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
               mode === 'monthly'
-                ? 'bg-white dark:bg-[#181816] shadow-2xs text-[#181816] dark:text-white'
-                : 'text-[#6E6D68] dark:text-[#9E9C94] hover:text-[#181816] dark:hover:text-white'
+                ? 'bg-[#141412] dark:bg-[#C5A059] shadow-2xs text-[#F6F5F0] dark:text-[#111110]'
+                : 'text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-white'
             }`}
           >
             Monthly
@@ -140,10 +143,12 @@ export const TrendLineChart: React.FC<TrendLineChartProps> = ({
           </p>
         </div>
       ) : (
-        <div className="flex-1 min-h-[240px] w-full">
+        <div className="flex-1 min-h-[240px] w-full outline-none">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={trendData}
+              accessibilityLayer={false}
+              style={{ outline: 'none' }}
               margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#DCD9D0" strokeOpacity={0.5} vertical={false} />
