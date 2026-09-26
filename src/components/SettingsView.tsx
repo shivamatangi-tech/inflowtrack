@@ -44,8 +44,11 @@ import {
   CloudUpload,
   Clock,
   FileText,
+  FolderOpen,
+  ExternalLink,
 } from 'lucide-react';
 import { CategoryData, SpreadsheetInfo, ThemeMode, DriveBackupItem } from '../types';
+import { ConfirmationDialog } from './ConfirmationDialog';
 import {
   hasSecurityPinSet,
   getSecurityQuestions,
@@ -64,12 +67,19 @@ import {
   TARGET_DRIVE_FOLDER_NAME,
   TARGET_DRIVE_FOLDER_ID,
   TARGET_DRIVE_FOLDER_URL,
+  extractFolderIdFromUrlOrId,
+  updateDriveFolderLocation,
+  createNewInflowtrackSheetInDrive,
+  downloadSheetFromDrive,
   updateBudgetsInSheet,
   listDriveBackups,
   createDriveBackup,
   downloadDriveBackupFile,
 } from '../services/sheets';
-import { changeAccountPassword, getFreshAuthToken } from '../services/firebase';
+import {
+  changeUserPassword,
+  getFreshAuthToken,
+} from '../services/firebase';
 
 interface SettingsViewProps {
   sheetInfo?: SpreadsheetInfo | null;
@@ -81,6 +91,8 @@ interface SettingsViewProps {
   currentTheme: ThemeMode;
   onThemeChange: (theme: ThemeMode) => void;
   onRefresh: () => Promise<void>;
+  onDownloadSheet?: () => Promise<void>;
+  isDownloadingSheet?: boolean;
   onAddCategory: (type: 'Income' | 'Expense' | 'Transfer', categoryName: string) => Promise<void>;
   onSignOut: () => Promise<void>;
   isRefreshing?: boolean;
@@ -88,6 +100,7 @@ interface SettingsViewProps {
   onOpenUnlockModal?: () => void;
   onOpenChangePinModal?: () => void;
   onPinStatusChanged?: () => void;
+  onSheetInfoChange?: (sheetInfo: SpreadsheetInfo) => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -99,7 +112,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   userUid,
   currentTheme,
   onThemeChange,
-  onRefresh: _onRefresh,
+  onRefresh,
+  onDownloadSheet,
+  isDownloadingSheet: externalDownloading = false,
   onAddCategory,
   onSignOut,
   isRefreshing: _isRefreshing = false,
@@ -107,6 +122,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onOpenUnlockModal,
   onOpenChangePinModal,
   onPinStatusChanged,
+  onSheetInfoChange,
 }) => {
   // Category creation state
   const [newCatType, setNewCatType] = useState<'Income' | 'Expense' | 'Transfer'>('Expense');
@@ -145,7 +161,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [secConfigErr, setSecConfigErr] = useState<string | null>(null);
   const [isSavingSecConfig, setIsSavingSecConfig] = useState<boolean>(false);
 
-  // Private Google Drive Backups & Receipts state
+  // Private Google Drive Backups, Drive Location & Sheet Creation state
   const [backups, setBackups] = useState<DriveBackupItem[]>([]);
   const [isCreatingBackup, setIsCreatingBackup] = useState<boolean>(false);
   const [receiptTitle, setReceiptTitle] = useState<string>('');
@@ -154,7 +170,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [driveMessage, setDriveMessage] = useState<string | null>(null);
   const [driveError, setDriveError] = useState<string | null>(null);
 
+  const [driveFolderUrlInput, setDriveFolderUrlInput] = useState<string>(
+    sheetInfo?.driveFolderUrl || TARGET_DRIVE_FOLDER_URL
+  );
+  const [spreadsheetNameInput, setSpreadsheetNameInput] = useState<string>(
+    sheetInfo?.name || TARGET_SPREADSHEET_NAME
+  );
+  const [isUpdatingDriveLocation, setIsUpdatingDriveLocation] = useState<boolean>(false);
+  const [isCreatingNewSheet, setIsCreatingNewSheet] = useState<boolean>(false);
+  const [isLocalDownloadingSheet, setIsLocalDownloadingSheet] = useState<boolean>(false);
+  const [confirmActionType, setConfirmActionType] = useState<'create_sheet' | 'update_location' | null>(null);
+
   const pinConfigured = hasSecurityPinSet();
+
+  useEffect(() => {
+    if (sheetInfo?.driveFolderUrl) {
+      setDriveFolderUrlInput(sheetInfo.driveFolderUrl);
+    }
+    if (sheetInfo?.name) {
+      setSpreadsheetNameInput(sheetInfo.name);
+    }
+  }, [sheetInfo?.driveFolderUrl, sheetInfo?.name]);
 
   useEffect(() => {
     void (async () => {
@@ -162,6 +198,83 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setBackups(list);
     })();
   }, []);
+
+  const handleConfirmDriveMutation = async () => {
+    const action = confirmActionType;
+    setConfirmActionType(null);
+    if (!action) return;
+
+    setDriveError(null);
+    setDriveMessage(null);
+
+    if (action === 'create_sheet') {
+      setIsCreatingNewSheet(true);
+      try {
+        const res = await createNewInflowtrackSheetInDrive(null, {
+          driveFolderUrl: driveFolderUrlInput.trim() || TARGET_DRIVE_FOLDER_URL,
+          spreadsheetName: spreadsheetNameInput.trim() || TARGET_SPREADSHEET_NAME,
+        });
+        if (onSheetInfoChange && res.sheetInfo) {
+          onSheetInfoChange(res.sheetInfo);
+        }
+        await onRefresh();
+        setDriveMessage(res.message);
+        setTimeout(() => setDriveMessage(null), 6000);
+      } catch (err: any) {
+        setDriveError(err.message || 'Failed to create new inflowtrack sheet in Google Drive.');
+      } finally {
+        setIsCreatingNewSheet(false);
+      }
+      return;
+    }
+
+    if (action === 'update_location') {
+      setIsUpdatingDriveLocation(true);
+      try {
+        const res = await updateDriveFolderLocation(null, {
+          driveFolderUrl: driveFolderUrlInput.trim() || TARGET_DRIVE_FOLDER_URL,
+          spreadsheetName: spreadsheetNameInput.trim() || TARGET_SPREADSHEET_NAME,
+          createNewSheet: false,
+        });
+        if (onSheetInfoChange && res.sheetInfo) {
+          onSheetInfoChange(res.sheetInfo);
+        }
+        await onRefresh();
+        setDriveMessage(res.message);
+        setTimeout(() => setDriveMessage(null), 6000);
+      } catch (err: any) {
+        setDriveError(err.message || 'Failed to update Google Drive folder location.');
+      } finally {
+        setIsUpdatingDriveLocation(false);
+      }
+    }
+  };
+
+  const handleTriggerDownloadSheet = async () => {
+    setDriveError(null);
+    setDriveMessage(null);
+    if (onDownloadSheet) {
+      await onDownloadSheet();
+      return;
+    }
+    setIsLocalDownloadingSheet(true);
+    try {
+      const result = await downloadSheetFromDrive(null, {
+        driveFolderUrl: driveFolderUrlInput.trim() || TARGET_DRIVE_FOLDER_URL,
+        spreadsheetName: spreadsheetNameInput.trim() || TARGET_SPREADSHEET_NAME,
+      });
+      setDriveMessage(
+        `Stored latest sheet in Drive folder (${extractFolderIdFromUrlOrId(
+          driveFolderUrlInput
+        )}) and downloaded "${result.fileName}".`
+      );
+      setTimeout(() => setDriveMessage(null), 5000);
+    } catch (err: any) {
+      setDriveError(err.message || 'Failed to store and download sheet.');
+    } finally {
+      setIsLocalDownloadingSheet(false);
+    }
+  };
 
   const handleAddCategorySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -238,7 +351,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
     setIsChangingPassword(true);
     try {
-      await changeAccountPassword(currentPassword, newPassword);
+      await changeUserPassword(currentPassword, newPassword);
       setPasswordSuccess('Your account password has been updated securely.');
       setCurrentPassword('');
       setNewPassword('');
@@ -917,23 +1030,53 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <h2 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide flex items-center gap-2">
             <IndianRupee className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-            Google Sheets Database &amp; Private Google Drive Backups
+            Google Drive Location &amp; inflowtrack Sheet Management
           </h2>
 
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              id="btn-settings-download-sheet"
+              onClick={() => void handleTriggerDownloadSheet()}
+              disabled={externalDownloading || isLocalDownloadingSheet}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {externalDownloading || isLocalDownloadingSheet ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}
+              <span>Download Sheet</span>
+            </button>
+
+            <button
+              type="button"
+              id="btn-settings-create-new-sheet"
+              onClick={() => setConfirmActionType('create_sheet')}
+              disabled={isCreatingNewSheet}
+              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {isCreatingNewSheet ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+              )}
+              <span>Create New inflowtrack Sheet</span>
+            </button>
+
+            <button
+              type="button"
               id="btn-create-drive-backup"
               onClick={handleCreateDriveBackup}
               disabled={isCreatingBackup}
-              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+              className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
             >
               {isCreatingBackup ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
                 <CloudUpload className="w-3.5 h-3.5" />
               )}
-              <span>Backup to Google Drive</span>
+              <span>Backup JSON</span>
             </button>
 
             <button
@@ -942,8 +1085,107 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 text-xs font-bold rounded-lg border border-indigo-200 dark:border-indigo-800 flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>Archive Receipt Note</span>
+              <span>Archive Receipt</span>
             </button>
+          </div>
+        </div>
+
+        {/* Google Drive Location & Sheet Configuration Form */}
+        <div className="mb-4 p-4 bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <FolderOpen className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span>Google Drive Folder Location &amp; Sheet Name</span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                Stores and downloads your <strong className="text-slate-700 dark:text-slate-300">inflowtrack</strong> spreadsheet directly inside your Google Drive folder
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+            <div className="md:col-span-6">
+              <label
+                htmlFor="input-drive-folder-url"
+                className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1"
+              >
+                Google Drive Folder URL or ID
+              </label>
+              <input
+                type="text"
+                id="input-drive-folder-url"
+                value={driveFolderUrlInput}
+                onChange={(e) => setDriveFolderUrlInput(e.target.value)}
+                placeholder="https://drive.google.com/drive/folders/1WTHHDzwzO79ypcP06ZmDkBuDADosnH30"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            <div className="md:col-span-3">
+              <label
+                htmlFor="input-spreadsheet-name"
+                className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1"
+              >
+                Sheet Name
+              </label>
+              <input
+                type="text"
+                id="input-spreadsheet-name"
+                value={spreadsheetNameInput}
+                onChange={(e) => setSpreadsheetNameInput(e.target.value)}
+                placeholder="inflowtrack"
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            <div className="md:col-span-3">
+              <button
+                type="button"
+                id="btn-save-drive-location"
+                onClick={() => setConfirmActionType('update_location')}
+                disabled={isUpdatingDriveLocation}
+                className="w-full px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isUpdatingDriveLocation ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                )}
+                <span>Update Location</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] text-slate-500 dark:text-slate-400">
+            <span>
+              Resolved Folder ID:{' '}
+              <strong className="font-mono text-slate-700 dark:text-slate-300">
+                {extractFolderIdFromUrlOrId(driveFolderUrlInput)}
+              </strong>
+            </span>
+            <div className="flex items-center gap-3">
+              {sheetInfo?.url && (
+                <a
+                  href={sheetInfo.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline inline-flex items-center gap-1"
+                >
+                  <span>Open {sheetInfo.name || TARGET_SPREADSHEET_NAME} Sheet</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+              <a
+                href={`https://drive.google.com/drive/folders/${extractFolderIdFromUrlOrId(driveFolderUrlInput)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline inline-flex items-center gap-1"
+              >
+                <span>Open Drive Folder</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
           </div>
         </div>
 
@@ -1004,7 +1246,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </form>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="p-4 bg-slate-50/70 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-800">
+            <div className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+              Google Cloud Project
+            </div>
+            <div className="text-sm font-bold text-slate-900 dark:text-white mt-1 font-mono truncate">
+              inflowtrack-06
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+              Project #472293799820 (Firebase Auth &amp; Cloud Config)
+            </p>
+          </div>
+
           <div className="p-4 bg-slate-50/70 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
               Base Currency
@@ -1127,6 +1381,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           Sign Out
         </button>
       </div>
+
+      {/* Confirmation Dialog for Creating / Updating Google Drive Sheet */}
+      <ConfirmationDialog
+        isOpen={confirmActionType !== null}
+        title={
+          confirmActionType === 'create_sheet'
+            ? `Create New "${spreadsheetNameInput.trim() || TARGET_SPREADSHEET_NAME}" Sheet in Google Drive?`
+            : 'Update Google Drive Folder Location?'
+        }
+        message={
+          confirmActionType === 'create_sheet'
+            ? `This will create a new Google Sheet named "${
+                spreadsheetNameInput.trim() || TARGET_SPREADSHEET_NAME
+              }" inside your Google Drive folder (${extractFolderIdFromUrlOrId(
+                driveFolderUrlInput
+              )}) and sync your categories, budgets, and transactions into it.`
+            : `This will update your target Google Drive folder to ${
+                driveFolderUrlInput.trim() || TARGET_DRIVE_FOLDER_URL
+              } (ID: ${extractFolderIdFromUrlOrId(
+                driveFolderUrlInput
+              )}) and sync your "${
+                spreadsheetNameInput.trim() || TARGET_SPREADSHEET_NAME
+              }" spreadsheet.`
+        }
+        confirmLabel={
+          confirmActionType === 'create_sheet' ? 'Create Sheet in Drive' : 'Confirm Update Location'
+        }
+        cancelLabel="Cancel"
+        isDestructive={false}
+        isLoading={isCreatingNewSheet || isUpdatingDriveLocation}
+        onConfirm={() => void handleConfirmDriveMutation()}
+        onCancel={() => setConfirmActionType(null)}
+      />
     </div>
   );
 };

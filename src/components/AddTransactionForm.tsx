@@ -3,39 +3,17 @@
  * File: src/components/AddTransactionForm.tsx
  * Application: inflotrack — Track Save Grow
  * Purpose:
- *   Interactive transaction entry form for recording new financial records
- *   into the user's private Google Sheet.
- *
- * Key Responsibilities:
- *   1. Supports all 7 transaction types: Income, Expense, Transfer, Savings,
- *      Emergency Fund, Lent (Receivable), and Borrowed (Payable).
- *   2. Captures Date, Time, Amount (INR), Category, Optional Subcategory,
- *      Payment Method, Account/Wallet, and Notes/Description.
- *   3. Validates inputs and delegates saving to the backend-verified Google
- *      Sheets append API (`onSave`).
+ *   Transaction composer styled in the warm stone & matte obsidian aesthetic
+ *   with Poppins typography and pill-segmented transaction types.
  * ============================================================================
  */
 
 import React, { useState, useEffect } from 'react';
 import {
-  TrendingUp,
-  TrendingDown,
-  PiggyBank,
-  ShieldCheck,
-  ArrowUpRight,
-  ArrowDownLeft,
-  ArrowLeftRight,
-  PlusCircle,
   CheckCircle2,
   AlertCircle,
   Loader2,
-  Calendar,
-  Clock,
   IndianRupee,
-  Tag,
-  FileText,
-  CreditCard,
-  Wallet,
 } from 'lucide-react';
 import { TransactionType, CategoryData } from '../types';
 import { getTodayDateString } from '../utils/formatters';
@@ -227,7 +205,7 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
       });
 
       setSuccessMessage(
-        `Recorded ₹${numericAmount.toLocaleString('en-IN')} as ${type} via ${finalPaymentMode || 'HDFC Bank'}`
+        `Recorded ₹${numericAmount.toLocaleString('en-IN')} as ${type} (${finalCategory})`
       );
 
       setAmount('');
@@ -253,72 +231,40 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
     }
   };
 
-  const typeConfig: {
-    [key in 'Income' | 'Expense' | 'Transfer' | 'Savings' | 'Emergency Fund' | 'Lent' | 'Borrowed']: {
-      label: string;
-      icon: React.ReactNode;
-      activeColor: string;
-    };
-  } = {
-    Income: {
-      label: 'Income',
-      icon: <TrendingUp className="w-3.5 h-3.5" />,
-      activeColor: 'bg-emerald-600 text-white shadow-xs',
-    },
-    Expense: {
-      label: 'Expense',
-      icon: <TrendingDown className="w-3.5 h-3.5" />,
-      activeColor: 'bg-rose-600 text-white shadow-xs',
-    },
-    Transfer: {
-      label: 'Transfer',
-      icon: <ArrowLeftRight className="w-3.5 h-3.5" />,
-      activeColor: 'bg-indigo-600 text-white shadow-xs',
-    },
-    Savings: {
-      label: 'Savings',
-      icon: <PiggyBank className="w-3.5 h-3.5" />,
-      activeColor: 'bg-blue-600 text-white shadow-xs',
-    },
-    'Emergency Fund': {
-      label: 'Emergency',
-      icon: <ShieldCheck className="w-3.5 h-3.5" />,
-      activeColor: 'bg-amber-500 text-white shadow-xs',
-    },
-    Lent: {
-      label: 'Lent',
-      icon: <ArrowUpRight className="w-3.5 h-3.5" />,
-      activeColor: 'bg-purple-600 text-white shadow-xs',
-    },
-    Borrowed: {
-      label: 'Borrowed',
-      icon: <ArrowDownLeft className="w-3.5 h-3.5" />,
-      activeColor: 'bg-rose-600 text-white shadow-xs',
-    },
-  };
+  const typeOptions: Array<{
+    key: 'Income' | 'Expense' | 'Transfer' | 'Savings' | 'Emergency Fund' | 'Lent' | 'Borrowed';
+    label: string;
+  }> = [
+    { key: 'Expense', label: 'Expense' },
+    { key: 'Income', label: 'Income' },
+    { key: 'Savings', label: 'Savings' },
+    { key: 'Emergency Fund', label: 'Emergency' },
+    { key: 'Transfer', label: 'Transfer' },
+    { key: 'Lent', label: 'Lent' },
+    { key: 'Borrowed', label: 'Borrowed' },
+  ];
 
   return (
     <div
       id="add-transaction-form-card"
-      className="bg-white dark:bg-slate-900 rounded-xl sm:rounded-2xl p-5 md:p-6 shadow-xs border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 flex flex-col justify-between transition-colors"
+      className="bg-white dark:bg-[#1A1B19] rounded-3xl p-5 sm:p-6 border border-[#E6E4DD] dark:border-[#2A2B28] text-[#181816] dark:text-[#F4F3EF] flex flex-col justify-between transition-colors h-full"
     >
       <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide flex items-center gap-2">
-            <PlusCircle className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-            Add Transaction
+        <div className="flex items-baseline justify-between mb-4">
+          <h2 className="text-base font-semibold text-[#181816] dark:text-white tracking-tight">
+            Record transaction
           </h2>
-          <span className="text-[11px] text-slate-400 dark:text-slate-500 font-semibold">
-            Google Sheets Synchronized
+          <span className="text-xs text-[#8A8880] dark:text-[#9E9C94]">
+            Synced to sheet
           </span>
         </div>
 
         {successMessage && (
           <div
             id="form-success-banner"
-            className="mb-4 p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-center gap-2 text-emerald-800 dark:text-emerald-300 text-xs font-medium"
+            className="mb-4 p-3 bg-[#EDF3EC] dark:bg-emerald-950/50 border border-[#C6DEC3] dark:border-emerald-800/80 rounded-2xl flex items-center gap-2 text-[#2E7D32] dark:text-emerald-300 text-xs font-medium"
           >
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
             <span>{successMessage}</span>
           </div>
         )}
@@ -326,7 +272,7 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
         {errors.form && (
           <div
             id="form-error-banner"
-            className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 rounded-xl flex items-center gap-2 text-rose-800 dark:text-rose-300 text-xs font-medium"
+            className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/80 rounded-2xl flex items-center gap-2 text-rose-800 dark:text-rose-300 text-xs font-medium"
           >
             <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
             <span>{errors.form}</span>
@@ -334,30 +280,27 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
         )}
 
         <form onSubmit={handleSubmit} className="space-y-3.5">
-          {/* 1. Transaction Type Selector */}
+          {/* 1. Soft Stone Segmented Type Bar */}
           <div>
-            <label className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1 tracking-wider">
-              Type <span className="text-rose-500">*</span>
+            <label className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94] block mb-1.5">
+              Transaction type
             </label>
-            <div className="grid grid-cols-4 sm:grid-cols-7 gap-1 p-1 bg-slate-50/80 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-              {(Object.keys(typeConfig) as Array<keyof typeof typeConfig>).map((t) => {
-                const isSelected = type === t;
+            <div className="flex flex-wrap gap-1 p-1 bg-[#EAE8E1] dark:bg-[#262724] rounded-2xl">
+              {typeOptions.map((item) => {
+                const isSelected = type === item.key;
                 return (
                   <button
                     type="button"
-                    key={t}
-                    id={`type-btn-${t.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
-                    onClick={() => setType(t)}
-                    className={`flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    key={item.key}
+                    id={`type-btn-${item.key.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
+                    onClick={() => setType(item.key)}
+                    className={`flex-1 min-w-[70px] py-1.5 px-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
                       isSelected
-                        ? typeConfig[t].activeColor
-                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-700/60'
+                        ? 'bg-white dark:bg-[#181816] text-[#181816] dark:text-white shadow-2xs font-semibold'
+                        : 'text-[#6E6D68] dark:text-[#9E9C94] hover:text-[#181816] dark:hover:text-white'
                     }`}
                   >
-                    <div className="mb-0.5">{typeConfig[t].icon}</div>
-                    <span className="truncate w-full text-center text-[10px]">
-                      {typeConfig[t].label}
-                    </span>
+                    {item.label}
                   </button>
                 );
               })}
@@ -367,17 +310,17 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
             )}
           </div>
 
-          {/* 2. Amount & Payment Mode in 2-Column Responsive Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          {/* 2. Amount & Payment Mode */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label
                 htmlFor="tx-amount"
-                className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1 tracking-wider"
+                className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94] block mb-1.5"
               >
-                Amount (INR ₹) <span className="text-rose-500">*</span>
+                Amount (₹)
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#8A8880]">
                   <IndianRupee className="w-3.5 h-3.5" />
                 </div>
                 <input
@@ -387,11 +330,11 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
                   id="tx-amount"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  placeholder="₹ 0.00"
-                  className={`w-full pl-8 pr-3 py-2 bg-slate-50/70 dark:bg-slate-800 border rounded-lg text-xs font-semibold text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${
+                  placeholder="0.00"
+                  className={`w-full pl-8 pr-3 py-2.5 bg-[#F4F3EF]/80 dark:bg-[#262724] border rounded-2xl tabular-nums text-xs font-semibold text-[#181816] dark:text-white placeholder-[#8A8880] focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:border-[#4A5240] transition-all ${
                     errors.amount
                       ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/30'
-                      : 'border-slate-200 dark:border-slate-700'
+                      : 'border-[#E6E4DD] dark:border-[#343531]'
                   }`}
                 />
               </div>
@@ -401,113 +344,92 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label
-                  htmlFor="tx-payment-mode"
-                  className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block tracking-wider"
-                >
-                  Payment Mode
-                </label>
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
-                  Categories!C
-                </span>
-              </div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
-                  <CreditCard className="w-3.5 h-3.5" />
-                </div>
-                <select
-                  id="tx-payment-mode"
-                  value={paymentMode}
-                  onChange={(e) => setPaymentMode(e.target.value)}
-                  className="w-full pl-8 pr-8 py-2 bg-slate-50/70 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all cursor-pointer"
-                >
-                  {paymentModesList.map((mode) => (
-                    <option
-                      key={mode}
-                      value={mode}
-                      className="text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-800"
-                    >
-                      {mode}
-                    </option>
-                  ))}
-                  {!paymentModesList.includes('Other Payment Mode') && (
-                    <option
-                      value="Other Payment Mode"
-                      className="text-indigo-600 dark:text-indigo-400 font-semibold bg-white dark:bg-slate-800"
-                    >
-                      Other Payment Mode
-                    </option>
-                  )}
-                </select>
-              </div>
+              <label
+                htmlFor="tx-payment-mode"
+                className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94] block mb-1.5"
+              >
+                Payment method
+              </label>
+              <select
+                id="tx-payment-mode"
+                value={paymentMode}
+                onChange={(e) => setPaymentMode(e.target.value)}
+                className="w-full px-3 py-2.5 bg-[#F4F3EF]/80 dark:bg-[#262724] border border-[#E6E4DD] dark:border-[#343531] rounded-2xl text-xs font-medium text-[#181816] dark:text-white focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:border-[#4A5240] transition-all cursor-pointer"
+              >
+                {paymentModesList.map((mode) => (
+                  <option
+                    key={mode}
+                    value={mode}
+                    className="text-[#181816] dark:text-white bg-white dark:bg-[#1A1B19]"
+                  >
+                    {mode}
+                  </option>
+                ))}
+                {!paymentModesList.includes('Other Payment Mode') && (
+                  <option
+                    value="Other Payment Mode"
+                    className="text-[#4A5240] dark:text-[#B8A38A] font-semibold bg-white dark:bg-[#1A1B19]"
+                  >
+                    Other Payment Mode
+                  </option>
+                )}
+              </select>
             </div>
           </div>
 
           {(paymentMode === 'Other Payment Mode' || paymentMode === '__custom__') && (
-            <div className="mt-1">
+            <div>
               <input
                 type="text"
                 id="tx-custom-payment-mode"
                 value={customPaymentMode}
                 onChange={(e) => setCustomPaymentMode(e.target.value)}
-                placeholder="Optional: Specify payment mode name (e.g. Cash, Amex, Sodexo)..."
-                className="w-full px-3 py-2 bg-slate-50/70 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Specify payment mode (e.g. Cash, Amex)..."
+                className="w-full px-3 py-2.5 bg-[#F4F3EF]/80 dark:bg-[#262724] border border-[#E6E4DD] dark:border-[#343531] rounded-2xl text-xs text-[#181816] dark:text-white placeholder-[#8A8880] focus:outline-none focus:border-[#4A5240]"
               />
             </div>
           )}
 
-          {/* 3. Category & Subcategory / Wallet */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          {/* 3. Category & Account */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label
-                  htmlFor="tx-category"
-                  className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block tracking-wider"
-                >
-                  Category <span className="text-rose-500">*</span>
-                </label>
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
-                  {type === 'Income' ? 'Categories!A' : type === 'Expense' ? 'Categories!B' : 'Categories'}
-                </span>
-              </div>
-
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
-                  <Tag className="w-3.5 h-3.5" />
-                </div>
-                <select
-                  id="tx-category"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className={`w-full pl-8 pr-8 py-2 bg-slate-50/70 dark:bg-slate-800 border rounded-lg text-xs font-medium text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all cursor-pointer ${
-                    errors.category
-                      ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/30'
-                      : 'border-slate-200 dark:border-slate-700'
-                  }`}
-                >
-                  {currentCategoryList.length === 0 && (
-                    <option value="" className="text-slate-400">
-                      No categories found
-                    </option>
-                  )}
-                  {currentCategoryList.map((cat) => (
-                    <option
-                      key={cat}
-                      value={cat}
-                      className="text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-800"
-                    >
-                      {cat}
-                    </option>
-                  ))}
-                  <option
-                    value="__custom__"
-                    className="text-indigo-600 dark:text-indigo-400 font-semibold bg-white dark:bg-slate-800"
-                  >
-                    + Other / Custom Category...
+              <label
+                htmlFor="tx-category"
+                className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94] block mb-1.5"
+              >
+                Category
+              </label>
+              <select
+                id="tx-category"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className={`w-full px-3 py-2.5 bg-[#F4F3EF]/80 dark:bg-[#262724] border rounded-2xl text-xs font-medium text-[#181816] dark:text-white focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:border-[#4A5240] transition-all cursor-pointer ${
+                  errors.category
+                    ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/30'
+                    : 'border-[#E6E4DD] dark:border-[#343531]'
+                }`}
+              >
+                {currentCategoryList.length === 0 && (
+                  <option value="" className="text-[#8A8880]">
+                    No categories found
                   </option>
-                </select>
-              </div>
+                )}
+                {currentCategoryList.map((cat) => (
+                  <option
+                    key={cat}
+                    value={cat}
+                    className="text-[#181816] dark:text-white bg-white dark:bg-[#1A1B19]"
+                  >
+                    {cat}
+                  </option>
+                ))}
+                <option
+                  value="__custom__"
+                  className="text-[#4A5240] dark:text-[#B8A38A] font-semibold bg-white dark:bg-[#1A1B19]"
+                >
+                  + Custom Category...
+                </option>
+              </select>
 
               {category === '__custom__' && (
                 <div className="mt-2">
@@ -517,7 +439,7 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
                     value={customCategory}
                     onChange={(e) => setCustomCategory(e.target.value)}
                     placeholder="Enter category name..."
-                    className="w-full px-3 py-2 bg-slate-50/70 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-3 py-2.5 bg-[#F4F3EF]/80 dark:bg-[#262724] border border-[#E6E4DD] dark:border-[#343531] rounded-2xl text-xs text-[#181816] dark:text-white placeholder-[#8A8880] focus:outline-none focus:border-[#4A5240]"
                   />
                 </div>
               )}
@@ -530,55 +452,45 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
             <div>
               <label
                 htmlFor="tx-account"
-                className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1 tracking-wider"
+                className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94] block mb-1.5"
               >
                 Account / Wallet
               </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
-                  <Wallet className="w-3.5 h-3.5" />
-                </div>
-                <select
-                  id="tx-account"
-                  value={account}
-                  onChange={(e) => setAccount(e.target.value)}
-                  className="w-full pl-8 pr-8 py-2 bg-slate-50/70 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all cursor-pointer"
-                >
-                  {accountsList.map((acc) => (
-                    <option key={acc} value={acc} className="text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-800">
-                      {acc}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <select
+                id="tx-account"
+                value={account}
+                onChange={(e) => setAccount(e.target.value)}
+                className="w-full px-3 py-2.5 bg-[#F4F3EF]/80 dark:bg-[#262724] border border-[#E6E4DD] dark:border-[#343531] rounded-2xl text-xs font-medium text-[#181816] dark:text-white focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:border-[#4A5240] transition-all cursor-pointer"
+              >
+                {accountsList.map((acc) => (
+                  <option key={acc} value={acc} className="text-[#181816] dark:text-white bg-white dark:bg-[#1A1B19]">
+                    {acc}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
-          {/* 4. Date & Time Picker */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          {/* 4. Date & Time */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label
                 htmlFor="tx-date"
-                className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1 tracking-wider"
+                className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94] block mb-1.5"
               >
-                Date <span className="text-rose-500">*</span>
+                Date
               </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
-                  <Calendar className="w-3.5 h-3.5" />
-                </div>
-                <input
-                  type="date"
-                  id="tx-date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className={`w-full pl-8 pr-3 py-2 bg-slate-50/70 dark:bg-slate-800 border rounded-lg text-xs font-medium text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${
-                    errors.date
-                      ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/30'
-                      : 'border-slate-200 dark:border-slate-700'
-                  }`}
-                />
-              </div>
+              <input
+                type="date"
+                id="tx-date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={`w-full px-3 py-2.5 bg-[#F4F3EF]/80 dark:bg-[#262724] border rounded-2xl tabular-nums text-xs font-medium text-[#181816] dark:text-white focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:border-[#4A5240] transition-all ${
+                  errors.date
+                    ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/30'
+                    : 'border-[#E6E4DD] dark:border-[#343531]'
+                }`}
+              />
               {errors.date && (
                 <p className="text-xs text-rose-600 dark:text-rose-400 mt-1 font-medium">{errors.date}</p>
               )}
@@ -587,64 +499,54 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
             <div>
               <label
                 htmlFor="tx-time"
-                className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1 tracking-wider"
+                className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94] block mb-1.5"
               >
                 Time
               </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
-                  <Clock className="w-3.5 h-3.5" />
-                </div>
-                <input
-                  type="time"
-                  id="tx-time"
-                  value={time}
-                  onChange={(e) => setTime(e.target.value)}
-                  className="w-full pl-8 pr-3 py-2 bg-slate-50/70 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                />
-              </div>
+              <input
+                type="time"
+                id="tx-time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className="w-full px-3 py-2.5 bg-[#F4F3EF]/80 dark:bg-[#262724] border border-[#E6E4DD] dark:border-[#343531] rounded-2xl tabular-nums text-xs font-medium text-[#181816] dark:text-white focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:border-[#4A5240] transition-all"
+              />
             </div>
           </div>
 
-          {/* 5. Subcategory & Description / Notes */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          {/* 5. Subcategory & Description */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label
                 htmlFor="tx-subcategory"
-                className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1 tracking-wider"
+                className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94] block mb-1.5"
               >
-                Subcategory <span className="text-slate-400 dark:text-slate-500 font-normal lowercase">(optional)</span>
+                Merchant / Subcategory <span className="text-[#8A8880] font-normal">(optional)</span>
               </label>
               <input
                 type="text"
                 id="tx-subcategory"
                 value={subcategory}
                 onChange={(e) => setSubcategory(e.target.value)}
-                placeholder="e.g. Dining Out, Vegetables..."
-                className="w-full px-3 py-2 bg-slate-50/70 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                placeholder="e.g. Starbucks, Amazon..."
+                className="w-full px-3 py-2.5 bg-[#F4F3EF]/80 dark:bg-[#262724] border border-[#E6E4DD] dark:border-[#343531] rounded-2xl text-xs text-[#181816] dark:text-white placeholder-[#8A8880] focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:border-[#4A5240] transition-all"
               />
             </div>
 
             <div>
               <label
                 htmlFor="tx-description"
-                className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block mb-1 tracking-wider"
+                className="text-xs font-medium text-[#6E6D68] dark:text-[#9E9C94] block mb-1.5"
               >
-                Notes / Description <span className="text-slate-400 dark:text-slate-500 font-normal lowercase">(optional)</span>
+                Notes <span className="text-[#8A8880] font-normal">(optional)</span>
               </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
-                  <FileText className="w-3.5 h-3.5" />
-                </div>
-                <input
-                  type="text"
-                  id="tx-description"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="e.g. Weekly Supermarket Trip"
-                  className="w-full pl-8 pr-3 py-2 bg-slate-50/70 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                />
-              </div>
+              <input
+                type="text"
+                id="tx-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Add a short note..."
+                className="w-full px-3 py-2.5 bg-[#F4F3EF]/80 dark:bg-[#262724] border border-[#E6E4DD] dark:border-[#343531] rounded-2xl text-xs text-[#181816] dark:text-white placeholder-[#8A8880] focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:border-[#4A5240] transition-all"
+              />
             </div>
           </div>
 
@@ -653,12 +555,12 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
             type="submit"
             id="btn-save-transaction"
             disabled={isSubmitting}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-bold py-3 rounded-lg text-xs mt-2 shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            className="w-full bg-[#181816] hover:bg-[#2C2D2A] dark:bg-[#F4F3EF] dark:hover:bg-[#E6E4DD] text-white dark:text-[#181816] font-semibold py-3 px-4 rounded-full text-xs mt-1 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
           >
             {isSubmitting ? (
               <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                <span>Saving to Google Sheets...</span>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Saving entry...</span>
               </>
             ) : (
               <span>Save Transaction</span>

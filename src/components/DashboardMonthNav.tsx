@@ -3,13 +3,8 @@
  * File: src/components/DashboardMonthNav.tsx
  * Application: inflotrack — Track Save Grow
  * Purpose:
- *   Dashboard period navigation bar allowing users to step forward/backward
- *   month-by-month or jump directly to any Month and Year via dropdowns.
- *
- * Key Responsibilities:
- *   1. Displays the currently active dashboard period (e.g., "September 2026").
- *   2. Emits `onMonthChange('YYYY-MM')` to filter dashboard summary cards,
- *      charts, and the transactions table.
+ *   Period navigation bar styled with Poppins typography and soft stone
+ *   segmented pill controls.
  * ============================================================================
  */
 
@@ -23,6 +18,7 @@ import {
   formatMonthYear,
   getPreviousMonthKey,
   getNextMonthKey,
+  getCurrentMonthKey,
 } from '../utils/formatters';
 
 interface DashboardMonthNavProps {
@@ -35,6 +31,9 @@ export const DashboardMonthNav: React.FC<DashboardMonthNavProps> = ({
   selectedMonth,
   onMonthChange,
 }) => {
+  const currentMonthKey = getCurrentMonthKey();
+  const isCurrentMonth = selectedMonth === currentMonthKey;
+
   const handlePrev = () => {
     onMonthChange(getPreviousMonthKey(selectedMonth));
   };
@@ -43,7 +42,6 @@ export const DashboardMonthNav: React.FC<DashboardMonthNavProps> = ({
     onMonthChange(getNextMonthKey(selectedMonth));
   };
 
-  // Split selectedMonth into year and month for select dropdowns
   const [yearStr, monthStr] = selectedMonth.split('-');
   const currentYear = parseInt(yearStr || '2026', 10);
 
@@ -62,7 +60,6 @@ export const DashboardMonthNav: React.FC<DashboardMonthNavProps> = ({
     { num: '12', name: 'December' },
   ];
 
-  // Generate range of years around current year
   const years = Array.from({ length: 9 }, (_, i) => currentYear - 4 + i);
 
   const handleMonthSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -78,76 +75,94 @@ export const DashboardMonthNav: React.FC<DashboardMonthNavProps> = ({
   return (
     <div
       id="dashboard-month-nav"
-      className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors"
+      className="flex flex-col sm:flex-row sm:items-center justify-between gap-3"
     >
-      {/* Left: Section Label & Clear Selected Period Indicator */}
-      <div className="flex items-center justify-center sm:justify-start gap-2.5 text-center sm:text-left">
-        <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-          <Calendar className="w-4 h-4" />
-        </div>
-        <div>
-          <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-            Dashboard Period
-          </div>
-          <div
-            id="current-dashboard-month-label"
-            className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white tracking-tight"
-          >
-            {formatMonthYear(selectedMonth)}
-          </div>
+      {/* Left: Active Period Heading */}
+      <div className="flex items-baseline gap-3">
+        <h2
+          id="current-dashboard-month-label"
+          className="text-xl sm:text-2xl font-semibold text-[#181816] dark:text-white tracking-tight"
+        >
+          {formatMonthYear(selectedMonth)}
+        </h2>
+        <div className="flex items-center gap-1.5 text-xs text-[#8A8880] dark:text-[#9E9C94]">
+          <span>Analytics & Ledger</span>
+          {!isCurrentMonth && (
+            <>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
+                onClick={() => onMonthChange(currentMonthKey)}
+                className="text-[#4A5240] dark:text-[#B8A38A] hover:underline font-medium cursor-pointer"
+              >
+                Current month
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Right: Smooth Month / Year Stepper and Direct Selectors */}
-      <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-end">
-        {/* Previous Month */}
+      {/* Right: Soft Stone Pill Selector */}
+      <div className="flex items-center gap-1 self-start sm:self-auto bg-[#EAE8E1] dark:bg-[#1C1D1B] p-1 rounded-full border border-[#E2DFD7] dark:border-[#2A2B28]">
         <button
           type="button"
           id="btn-dash-prev-month"
           onClick={handlePrev}
           title="Previous Month"
           aria-label="Previous Month"
-          className="p-2 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-800 transition-all cursor-pointer"
+          className="w-8 h-8 flex items-center justify-center text-[#181816] dark:text-[#F4F3EF] hover:bg-white dark:hover:bg-[#2C2D2A] rounded-full transition-colors cursor-pointer"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
 
-        {/* Month Dropdown */}
-        <select
-          id="select-dash-month"
-          value={monthStr}
-          onChange={handleMonthSelect}
-          className="px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-        >
-          {months.map((m) => (
-            <option key={m.num} value={m.num}>
-              {m.name}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-1 bg-white dark:bg-[#2C2D2A] px-3 py-1 rounded-full shadow-2xs">
+          <Calendar className="w-3.5 h-3.5 text-[#8A8880] dark:text-[#9E9C94] shrink-0 mr-0.5" />
+          <select
+            id="select-dash-month"
+            value={monthStr}
+            onChange={handleMonthSelect}
+            className="bg-transparent text-xs font-medium text-[#181816] dark:text-white focus:outline-none cursor-pointer"
+          >
+            {months.map((m) => (
+              <option
+                key={m.num}
+                value={m.num}
+                className="bg-white dark:bg-[#1C1D1B] text-[#181816] dark:text-white"
+              >
+                {m.name}
+              </option>
+            ))}
+          </select>
 
-        {/* Year Dropdown */}
-        <select
-          id="select-dash-year"
-          value={yearStr}
-          onChange={handleYearSelect}
-          className="px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-        >
-          {years.map((y) => (
-            <option key={y} value={String(y)}>
-              {y}
-            </option>
-          ))}
-        </select>
+          <span className="text-[#C7C3B8] dark:text-[#5C5B57]" aria-hidden="true">
+            /
+          </span>
 
-        {/* Next Month */}
+          <select
+            id="select-dash-year"
+            value={yearStr}
+            onChange={handleYearSelect}
+            className="bg-transparent tabular-nums text-xs font-medium text-[#181816] dark:text-white focus:outline-none cursor-pointer"
+          >
+            {years.map((y) => (
+              <option
+                key={y}
+                value={String(y)}
+                className="bg-white dark:bg-[#1C1D1B] text-[#181816] dark:text-white"
+              >
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <button
           type="button"
           id="btn-dash-next-month"
           onClick={handleNext}
           title="Next Month"
           aria-label="Next Month"
-          className="p-2 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-800 transition-all cursor-pointer"
+          className="w-8 h-8 flex items-center justify-center text-[#181816] dark:text-[#F4F3EF] hover:bg-white dark:hover:bg-[#2C2D2A] rounded-full transition-colors cursor-pointer"
         >
           <ChevronRight className="w-4 h-4" />
         </button>

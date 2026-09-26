@@ -13,7 +13,7 @@
  *      trusts any user ID supplied by the browser/client).
  *   3. Connects securely to the `inflowtrack` Google Sheet (primary finance
  *      database) and `inflowtrack` Google Drive folder
- *      (`1vzWhp8o3I_3jbtGvS0NUS2Xo-VdOBYKb`) using server-side credentials
+ *      (`1WTHHDzwzO79ypcP06ZmDkBuDADosnH30`) using server-side credentials
  *      only (Service Account, OAuth2 Refresh Token, or Apps Script Webhook),
  *      maintaining continuous sync between website, Sheet, and Drive.
  *   4. Isolates all financial transactions, categories, budgets, recurring
@@ -78,7 +78,7 @@ const GOOGLE_SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || '';
 const GOOGLE_SPREADSHEET_NAME = process.env.GOOGLE_SPREADSHEET_NAME || 'inflowtrack';
 const GOOGLE_DRIVE_FOLDER_NAME = process.env.GOOGLE_DRIVE_FOLDER_NAME || 'inflowtrack';
 const GOOGLE_DRIVE_FOLDER_ID =
-  process.env.GOOGLE_DRIVE_FOLDER_ID || '1vzWhp8o3I_3jbtGvS0NUS2Xo-VdOBYKb';
+  process.env.GOOGLE_DRIVE_FOLDER_ID || '1WTHHDzwzO79ypcP06ZmDkBuDADosnH30';
 const GOOGLE_DRIVE_FOLDER_URL = `https://drive.google.com/drive/folders/${GOOGLE_DRIVE_FOLDER_ID}`;
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
 const GOOGLE_PRIVATE_KEY = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
@@ -407,6 +407,7 @@ export interface AuthenticatedRequest extends Request {
     email: string;
     displayName: string;
   };
+  googleAccessToken?: string;
 }
 
 async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
@@ -455,6 +456,14 @@ async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextF
       return;
     }
 
+    const headerGoogleToken =
+      typeof req.headers['x-google-access-token'] === 'string'
+        ? req.headers['x-google-access-token'].trim()
+        : '';
+    if (headerGoogleToken) {
+      req.googleAccessToken = headerGoogleToken;
+    }
+
     req.user = verifiedUser;
     next();
   } catch {
@@ -472,22 +481,26 @@ async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextF
 let cachedServerGoogleToken: { token: string; expiresAt: number } | null = null;
 let resolvedDriveSpreadsheetId: string = GOOGLE_SPREADSHEET_ID;
 
-function hasGoogleCredentials(): boolean {
+function hasGoogleCredentials(userGoogleToken?: string): boolean {
   return Boolean(
-    (GOOGLE_SERVICE_ACCOUNT_EMAIL && GOOGLE_PRIVATE_KEY) ||
+    userGoogleToken ||
+      (GOOGLE_SERVICE_ACCOUNT_EMAIL && GOOGLE_PRIVATE_KEY) ||
       (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REFRESH_TOKEN)
   );
 }
 
-function isGoogleCloudConfigured(): boolean {
-  return Boolean((GOOGLE_SPREADSHEET_ID || GOOGLE_DRIVE_FOLDER_ID) && hasGoogleCredentials());
+function isGoogleCloudConfigured(userGoogleToken?: string): boolean {
+  return Boolean((GOOGLE_SPREADSHEET_ID || GOOGLE_DRIVE_FOLDER_ID || userGoogleToken) && hasGoogleCredentials(userGoogleToken));
 }
 
 function isAppsScriptConfigured(): boolean {
   return Boolean(GOOGLE_APPS_SCRIPT_URL);
 }
 
-async function getServerGoogleAccessToken(): Promise<string> {
+async function getServerGoogleAccessToken(userGoogleToken?: string): Promise<string> {
+  if (userGoogleToken && userGoogleToken.trim()) {
+    return userGoogleToken.trim();
+  }
   if (cachedServerGoogleToken && Date.now() < cachedServerGoogleToken.expiresAt) {
     return cachedServerGoogleToken.token;
   }
@@ -649,6 +662,17 @@ interface StoredDriveBackup {
   driveFileId?: string;
 }
 
+interface UserDriveConfigRecord {
+  uid: string;
+  driveFolderId: string;
+  driveFolderUrl: string;
+  driveFolderName: string;
+  spreadsheetId: string;
+  spreadsheetName: string;
+  spreadsheetUrl?: string;
+  updatedAt: string;
+}
+
 interface WorkbookStore {
   spreadsheetId: string;
   spreadsheetName: string;
@@ -658,8 +682,45 @@ interface WorkbookStore {
   userCategories: Record<string, UserCategoriesRecord>;
   userSecurity: Record<string, UserSecurityRecord>;
   userBudgets: Record<string, UserBudgetRecord>;
+  userDriveConfigs: Record<string, UserDriveConfigRecord>;
   recurringTemplates: StoredRecurringRecord[];
   driveBackups: StoredDriveBackup[];
+}
+
+function parseDriveFolderIdFromInput(rawInput?: string): { folderId: string; folderUrl: string } {
+  const trimmed = String(rawInput || '').trim();
+  if (!trimmed) {
+    return {
+      folderId: GOOGLE_DRIVE_FOLDER_ID,
+      folderUrl: GOOGLE_DRIVE_FOLDER_URL,
+    };
+  }
+  const folderMatch = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (folderMatch && folderMatch[1]) {
+    const id = folderMatch[1];
+    return {
+      folderId: id,
+      folderUrl: `https://drive.google.com/drive/folders/${id}`,
+    };
+  }
+  const idParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idParamMatch && idParamMatch[1]) {
+    const id = idParamMatch[1];
+    return {
+      folderId: id,
+      folderUrl: `https://drive.google.com/drive/folders/${id}`,
+    };
+  }
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) {
+    return {
+      folderId: trimmed,
+      folderUrl: `https://drive.google.com/drive/folders/${trimmed}`,
+    };
+  }
+  return {
+    folderId: GOOGLE_DRIVE_FOLDER_ID,
+    folderUrl: GOOGLE_DRIVE_FOLDER_URL,
+  };
 }
 
 function getMonthSheetName(rawDate?: string): string {
@@ -714,6 +775,7 @@ function loadWorkbook(): WorkbookStore {
         userCategories: parsed.userCategories || {},
         userSecurity: parsed.userSecurity || {},
         userBudgets: parsed.userBudgets || {},
+        userDriveConfigs: parsed.userDriveConfigs || {},
         recurringTemplates: Array.isArray(parsed.recurringTemplates) ? parsed.recurringTemplates : [],
         driveBackups: Array.isArray(parsed.driveBackups) ? parsed.driveBackups : [],
       };
@@ -729,6 +791,7 @@ function loadWorkbook(): WorkbookStore {
     userCategories: {},
     userSecurity: {},
     userBudgets: {},
+    userDriveConfigs: {},
     recurringTemplates: [],
     driveBackups: [],
   };
@@ -782,6 +845,28 @@ function ensureUserRecords(wb: WorkbookStore, uid: string): void {
       savingsTarget: 100000,
       emergencyFundTarget: 50000,
       monthlyExpenseBudget: 50000,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  if (!wb.userDriveConfigs) {
+    wb.userDriveConfigs = {};
+  }
+  if (
+    !wb.userDriveConfigs[uid] ||
+    wb.userDriveConfigs[uid].driveFolderId === '1vzWhp8o3I_3jbtGvS0NUS2Xo-VdOBYKb'
+  ) {
+    wb.userDriveConfigs[uid] = {
+      uid,
+      driveFolderId: GOOGLE_DRIVE_FOLDER_ID,
+      driveFolderUrl: GOOGLE_DRIVE_FOLDER_URL,
+      driveFolderName: GOOGLE_DRIVE_FOLDER_NAME,
+      spreadsheetId: wb.userDriveConfigs[uid]?.spreadsheetId || wb.spreadsheetId || 'sheet-inflowtrack-private',
+      spreadsheetName: wb.userDriveConfigs[uid]?.spreadsheetName || GOOGLE_SPREADSHEET_NAME,
+      spreadsheetUrl:
+        wb.spreadsheetId && wb.spreadsheetId !== 'sheet-inflowtrack-private'
+          ? `https://docs.google.com/spreadsheets/d/${wb.spreadsheetId}/edit`
+          : undefined,
       updatedAt: new Date().toISOString(),
     };
   }
@@ -851,58 +936,297 @@ function ensureUserRecords(wb: WorkbookStore, uid: string): void {
  * Resolves the target Google Spreadsheet ID for `inflowtrack`.
  * If `GOOGLE_SPREADSHEET_ID` is explicitly set, uses it directly.
  * Otherwise, searches inside the `inflowtrack` Google Drive folder
- * (`1vzWhp8o3I_3jbtGvS0NUS2Xo-VdOBYKb`) for a spreadsheet named `inflowtrack`
+ * (`1WTHHDzwzO79ypcP06ZmDkBuDADosnH30`) for a spreadsheet named `inflowtrack`
  * (or creates one inside that folder if credentials allow).
  */
-async function resolveTargetSpreadsheetId(accessToken: string): Promise<string> {
-  if (resolvedDriveSpreadsheetId) {
+async function resolveTargetSpreadsheetId(
+  accessToken: string,
+  options?: {
+    driveFolderId?: string;
+    spreadsheetName?: string;
+    existingSpreadsheetId?: string;
+    forceCreateNew?: boolean;
+  }
+): Promise<string> {
+  const targetFolderId = options?.driveFolderId || GOOGLE_DRIVE_FOLDER_ID;
+  const targetSheetName = options?.spreadsheetName || GOOGLE_SPREADSHEET_NAME;
+
+  if (
+    !options?.forceCreateNew &&
+    options?.existingSpreadsheetId &&
+    options.existingSpreadsheetId !== 'sheet-inflowtrack-private'
+  ) {
+    return options.existingSpreadsheetId;
+  }
+
+  if (!options?.forceCreateNew && resolvedDriveSpreadsheetId && targetFolderId === GOOGLE_DRIVE_FOLDER_ID) {
     return resolvedDriveSpreadsheetId;
   }
 
-  if (GOOGLE_DRIVE_FOLDER_ID) {
-    try {
-      const q = `'${GOOGLE_DRIVE_FOLDER_ID}' in parents and name = '${GOOGLE_SPREADSHEET_NAME}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`;
-      const searchUrl = `${DRIVE_BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name)`;
+  try {
+    if (!options?.forceCreateNew && targetFolderId) {
+      const q = `'${targetFolderId}' in parents and name = '${targetSheetName}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`;
+      const searchUrl = `${DRIVE_BASE_URL}/files?q=${encodeURIComponent(q)}&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name)`;
       const searchRes = await fetch(searchUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (searchRes.ok) {
         const searchData = await searchRes.json();
         if (Array.isArray(searchData.files) && searchData.files.length > 0) {
-          resolvedDriveSpreadsheetId = searchData.files[0].id;
-          return resolvedDriveSpreadsheetId;
+          const foundId = searchData.files[0].id;
+          resolvedDriveSpreadsheetId = foundId;
+          return foundId;
         }
       }
+    }
 
-      // If not found in folder, attempt to create the `inflowtrack` Sheet inside the `inflowtrack` Drive folder
-      const createRes = await fetch(`${DRIVE_BASE_URL}/files?fields=id,name`, {
+    // Attempt to create the `inflowtrack` Sheet directly inside the target Drive folder
+    if (targetFolderId) {
+      const createRes = await fetch(`${DRIVE_BASE_URL}/files?supportsAllDrives=true&fields=id,name`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: GOOGLE_SPREADSHEET_NAME,
+          name: targetSheetName,
           mimeType: 'application/vnd.google-apps.spreadsheet',
-          parents: [GOOGLE_DRIVE_FOLDER_ID],
+          parents: [targetFolderId],
         }),
       });
       if (createRes.ok) {
         const created = await createRes.json();
         if (created.id) {
           resolvedDriveSpreadsheetId = created.id;
-          return resolvedDriveSpreadsheetId;
+          return created.id;
         }
       }
-    } catch {
-      // Fallback if Drive discovery fails
     }
+
+    // Fallback: Create via Google Sheets v4 API and attach parent folder if accessible
+    const sheetsCreateRes = await fetch(SHEETS_BASE_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        properties: { title: targetSheetName },
+      }),
+    });
+    if (sheetsCreateRes.ok) {
+      const createdSheet = await sheetsCreateRes.json();
+      const newId = createdSheet.spreadsheetId;
+      if (newId) {
+        if (targetFolderId) {
+          await fetch(
+            `${DRIVE_BASE_URL}/files/${newId}?addParents=${encodeURIComponent(targetFolderId)}&supportsAllDrives=true`,
+            {
+              method: 'PATCH',
+              headers: { Authorization: `Bearer ${accessToken}` },
+            }
+          ).catch(() => {});
+        }
+        resolvedDriveSpreadsheetId = newId;
+        return newId;
+      }
+    }
+  } catch {
+    // Fallback if Drive discovery/creation fails
   }
 
   return GOOGLE_SPREADSHEET_ID;
 }
 
-async function syncFromLiveGoogleSheetsIfConfigured(wb: WorkbookStore, uid: string): Promise<void> {
+/**
+ * Syncs all user transactions, categories, and budgets into the target Google Sheet
+ * inside the user's Google Drive folder (`1WTHHDzwzO79ypcP06ZmDkBuDADosnH30`).
+ */
+async function populateFullWorkbookToLiveSheet(
+  accessToken: string,
+  spreadsheetId: string,
+  wb: WorkbookStore,
+  uid: string
+): Promise<void> {
+  if (!spreadsheetId || spreadsheetId === 'sheet-inflowtrack-private') return;
+
+  const userTxs = wb.transactions.filter((t) => t.uid === uid);
+  const currentMonthTab = getMonthSheetName();
+  const monthTabsSet = new Set<string>([currentMonthTab]);
+  userTxs.forEach((tx) => {
+    if (tx.sheetName) monthTabsSet.add(tx.sheetName);
+  });
+
+  const metaRes = await fetch(
+    `${SHEETS_BASE_URL}/${spreadsheetId}?fields=sheets(properties(sheetId,title))`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const existingTitles = new Set<string>();
+  if (metaRes.ok) {
+    const metaData = await metaRes.json();
+    (metaData.sheets || []).forEach((s: any) => {
+      if (s.properties?.title) {
+        existingTitles.add(String(s.properties.title));
+      }
+    });
+  }
+
+  const requiredTabs = [...Array.from(monthTabsSet), 'Categories', 'Summary'];
+  const addSheetRequests: any[] = [];
+  for (const tabName of requiredTabs) {
+    const hasTab = Array.from(existingTitles).some((t) => t.toUpperCase() === tabName.toUpperCase());
+    if (!hasTab) {
+      addSheetRequests.push({
+        addSheet: {
+          properties: {
+            title: tabName,
+            gridProperties: { frozenRowCount: 1 },
+          },
+        },
+      });
+    }
+  }
+
+  if (addSheetRequests.length > 0) {
+    await fetch(`${SHEETS_BASE_URL}/${spreadsheetId}:batchUpdate`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ requests: addSheetRequests }),
+    }).catch(() => {});
+  }
+
+  const headerRow = [
+    'Date',
+    'Type',
+    'Category',
+    'Amount',
+    'Payment Mode',
+    'Description',
+    'User UID',
+    'Transaction ID',
+    'Subcategory',
+    'Account / Wallet',
+    'Time',
+    'Created At',
+    'Updated At',
+  ];
+
+  // Write each monthly sheet tab
+  for (const monthTab of Array.from(monthTabsSet)) {
+    const tabTxs = userTxs
+      .filter((t) => (t.sheetName || getMonthSheetName(t.date)) === monthTab)
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const values = [
+      headerRow,
+      ...tabTxs.map((tx) => [
+        formatDateToDDMMYYYY(tx.date),
+        tx.type,
+        tx.category,
+        tx.amount,
+        tx.paymentMode,
+        tx.description,
+        tx.uid,
+        tx.transactionId,
+        tx.subcategory,
+        tx.account,
+        tx.time,
+        tx.createdAt,
+        tx.updatedAt,
+      ]),
+    ];
+
+    await fetch(
+      `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(monthTab)}!A1:M${
+        values.length
+      }?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ values }),
+      }
+    ).catch(() => {});
+  }
+
+  // Write Categories tab
+  const cats = wb.userCategories[uid];
+  if (cats) {
+    const maxLen = Math.max(
+      cats.incomeCategories.length,
+      cats.expenseCategories.length,
+      cats.transferCategories.length,
+      cats.savingsCategories.length,
+      cats.emergencyFundCategories.length,
+      cats.paymentModes.length,
+      1
+    );
+    const catRows: string[][] = [
+      ['Income Categories', 'Expense Categories', 'Transfer Categories', 'Savings Categories', 'Emergency Fund Categories', 'Payment Modes'],
+    ];
+    for (let i = 0; i < maxLen; i++) {
+      catRows.push([
+        cats.incomeCategories[i] || '',
+        cats.expenseCategories[i] || '',
+        cats.transferCategories[i] || '',
+        cats.savingsCategories[i] || '',
+        cats.emergencyFundCategories[i] || '',
+        cats.paymentModes[i] || '',
+      ]);
+    }
+    await fetch(
+      `${SHEETS_BASE_URL}/${spreadsheetId}/values/Categories!A1:F${catRows.length}?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ values: catRows }),
+      }
+    ).catch(() => {});
+  }
+
+  // Write Summary & Budgets tab
+  const budgets = wb.userBudgets[uid];
+  const driveCfg = wb.userDriveConfigs[uid];
+  const summaryRows = [
+    ['inflotrack — Personal Finance Workbook', 'Value'],
+    ['Spreadsheet Name', driveCfg?.spreadsheetName || GOOGLE_SPREADSHEET_NAME],
+    ['Google Drive Folder ID', driveCfg?.driveFolderId || GOOGLE_DRIVE_FOLDER_ID],
+    ['Google Drive Folder URL', driveCfg?.driveFolderUrl || GOOGLE_DRIVE_FOLDER_URL],
+    ['Savings Target (INR)', String(budgets?.savingsTarget || 100000)],
+    ['Emergency Fund Target (INR)', String(budgets?.emergencyFundTarget || 50000)],
+    ['Total Recorded Transactions', String(userTxs.length)],
+    ['Last Synced At', new Date().toISOString()],
+  ];
+  await fetch(
+    `${SHEETS_BASE_URL}/${spreadsheetId}/values/Summary!A1:B${summaryRows.length}?valueInputOption=USER_ENTERED`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ values: summaryRows }),
+    }
+  ).catch(() => {});
+}
+
+async function syncFromLiveGoogleSheetsIfConfigured(
+  wb: WorkbookStore,
+  uid: string,
+  userGoogleToken?: string
+): Promise<void> {
+  const driveCfg = wb.userDriveConfigs?.[uid];
+  const targetFolderId = driveCfg?.driveFolderId || GOOGLE_DRIVE_FOLDER_ID;
+  const targetSheetName = driveCfg?.spreadsheetName || GOOGLE_SPREADSHEET_NAME;
+
   if (isAppsScriptConfigured()) {
     try {
       const res = await fetch(GOOGLE_APPS_SCRIPT_URL, {
@@ -911,8 +1235,8 @@ async function syncFromLiveGoogleSheetsIfConfigured(wb: WorkbookStore, uid: stri
         body: JSON.stringify({
           secret: GOOGLE_APPS_SCRIPT_SECRET,
           action: 'READ_USER_DATA',
-          spreadsheetName: GOOGLE_SPREADSHEET_NAME,
-          driveFolderId: GOOGLE_DRIVE_FOLDER_ID,
+          spreadsheetName: targetSheetName,
+          driveFolderId: targetFolderId,
           driveFolderName: GOOGLE_DRIVE_FOLDER_NAME,
           uid,
         }),
@@ -933,15 +1257,24 @@ async function syncFromLiveGoogleSheetsIfConfigured(wb: WorkbookStore, uid: stri
     return;
   }
 
-  if (!isGoogleCloudConfigured()) return;
+  if (!isGoogleCloudConfigured(userGoogleToken)) return;
 
   try {
-    const accessToken = await getServerGoogleAccessToken();
-    const spreadsheetId = await resolveTargetSpreadsheetId(accessToken);
+    const accessToken = await getServerGoogleAccessToken(userGoogleToken);
+    const spreadsheetId = await resolveTargetSpreadsheetId(accessToken, {
+      driveFolderId: targetFolderId,
+      spreadsheetName: targetSheetName,
+      existingSpreadsheetId: driveCfg?.spreadsheetId,
+    });
     if (!spreadsheetId) return;
 
     wb.spreadsheetId = spreadsheetId;
-    wb.spreadsheetName = GOOGLE_SPREADSHEET_NAME;
+    wb.spreadsheetName = targetSheetName;
+    if (wb.userDriveConfigs?.[uid]) {
+      wb.userDriveConfigs[uid].spreadsheetId = spreadsheetId;
+      wb.userDriveConfigs[uid].spreadsheetName = targetSheetName;
+      wb.userDriveConfigs[uid].spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+    }
 
     const metaRes = await fetch(
       `${SHEETS_BASE_URL}/${spreadsheetId}?fields=sheets(properties(sheetId,title))`,
@@ -1013,11 +1346,15 @@ async function syncFromLiveGoogleSheetsIfConfigured(wb: WorkbookStore, uid: stri
       });
     }
 
-    if (fetchedForUser.length > 0 || txSheetTitles.length > 0) {
+    if (fetchedForUser.length > 0) {
       wb.transactions = [
         ...wb.transactions.filter((t) => t.uid !== uid),
         ...fetchedForUser,
       ];
+      saveWorkbook(wb);
+    } else if (wb.transactions.some((t) => t.uid === uid)) {
+      // If the newly created Google Sheet in Drive is empty, push existing user transactions into it
+      await populateFullWorkbookToLiveSheet(accessToken, spreadsheetId, wb, uid);
       saveWorkbook(wb);
     }
   } catch {
@@ -1025,7 +1362,11 @@ async function syncFromLiveGoogleSheetsIfConfigured(wb: WorkbookStore, uid: stri
   }
 }
 
-async function appendToLiveGoogleSheetIfConfigured(tx: StoredTransactionRow): Promise<void> {
+async function appendToLiveGoogleSheetIfConfigured(
+  tx: StoredTransactionRow,
+  userGoogleToken?: string,
+  driveCfg?: UserDriveConfigRecord
+): Promise<void> {
   if (isAppsScriptConfigured()) {
     const res = await fetch(GOOGLE_APPS_SCRIPT_URL, {
       method: 'POST',
@@ -1033,8 +1374,8 @@ async function appendToLiveGoogleSheetIfConfigured(tx: StoredTransactionRow): Pr
       body: JSON.stringify({
         secret: GOOGLE_APPS_SCRIPT_SECRET,
         action: 'APPEND_TRANSACTION',
-        spreadsheetName: GOOGLE_SPREADSHEET_NAME,
-        driveFolderId: GOOGLE_DRIVE_FOLDER_ID,
+        spreadsheetName: driveCfg?.spreadsheetName || GOOGLE_SPREADSHEET_NAME,
+        driveFolderId: driveCfg?.driveFolderId || GOOGLE_DRIVE_FOLDER_ID,
         driveFolderName: GOOGLE_DRIVE_FOLDER_NAME,
         uid: tx.uid,
         transaction: tx,
@@ -1046,10 +1387,14 @@ async function appendToLiveGoogleSheetIfConfigured(tx: StoredTransactionRow): Pr
     return;
   }
 
-  if (!isGoogleCloudConfigured()) return;
+  if (!isGoogleCloudConfigured(userGoogleToken)) return;
 
-  const accessToken = await getServerGoogleAccessToken();
-  const spreadsheetId = await resolveTargetSpreadsheetId(accessToken);
+  const accessToken = await getServerGoogleAccessToken(userGoogleToken);
+  const spreadsheetId = await resolveTargetSpreadsheetId(accessToken, {
+    driveFolderId: driveCfg?.driveFolderId,
+    spreadsheetName: driveCfg?.spreadsheetName,
+    existingSpreadsheetId: driveCfg?.spreadsheetId,
+  });
   if (!spreadsheetId) return;
 
   const sheetTitle = tx.sheetName;
@@ -1144,7 +1489,11 @@ async function appendToLiveGoogleSheetIfConfigured(tx: StoredTransactionRow): Pr
   }
 }
 
-async function updateInLiveGoogleSheetIfConfigured(tx: StoredTransactionRow): Promise<void> {
+async function updateInLiveGoogleSheetIfConfigured(
+  tx: StoredTransactionRow,
+  userGoogleToken?: string,
+  driveCfg?: UserDriveConfigRecord
+): Promise<void> {
   if (isAppsScriptConfigured()) {
     try {
       await fetch(GOOGLE_APPS_SCRIPT_URL, {
@@ -1153,8 +1502,8 @@ async function updateInLiveGoogleSheetIfConfigured(tx: StoredTransactionRow): Pr
         body: JSON.stringify({
           secret: GOOGLE_APPS_SCRIPT_SECRET,
           action: 'UPDATE_TRANSACTION',
-          spreadsheetName: GOOGLE_SPREADSHEET_NAME,
-          driveFolderId: GOOGLE_DRIVE_FOLDER_ID,
+          spreadsheetName: driveCfg?.spreadsheetName || GOOGLE_SPREADSHEET_NAME,
+          driveFolderId: driveCfg?.driveFolderId || GOOGLE_DRIVE_FOLDER_ID,
           uid: tx.uid,
           transaction: tx,
         }),
@@ -1165,11 +1514,15 @@ async function updateInLiveGoogleSheetIfConfigured(tx: StoredTransactionRow): Pr
     return;
   }
 
-  if (!isGoogleCloudConfigured()) return;
+  if (!isGoogleCloudConfigured(userGoogleToken)) return;
 
   try {
-    const accessToken = await getServerGoogleAccessToken();
-    const spreadsheetId = await resolveTargetSpreadsheetId(accessToken);
+    const accessToken = await getServerGoogleAccessToken(userGoogleToken);
+    const spreadsheetId = await resolveTargetSpreadsheetId(accessToken, {
+      driveFolderId: driveCfg?.driveFolderId,
+      spreadsheetName: driveCfg?.spreadsheetName,
+      existingSpreadsheetId: driveCfg?.spreadsheetId,
+    });
     if (!spreadsheetId) return;
 
     const rowValues = [
@@ -1208,7 +1561,9 @@ async function updateInLiveGoogleSheetIfConfigured(tx: StoredTransactionRow): Pr
 
 async function deleteFromLiveGoogleSheetIfConfigured(
   deletedTxs: StoredTransactionRow[],
-  uid: string
+  uid: string,
+  userGoogleToken?: string,
+  driveCfg?: UserDriveConfigRecord
 ): Promise<void> {
   if (deletedTxs.length === 0) return;
 
@@ -1220,8 +1575,8 @@ async function deleteFromLiveGoogleSheetIfConfigured(
         body: JSON.stringify({
           secret: GOOGLE_APPS_SCRIPT_SECRET,
           action: 'DELETE_TRANSACTIONS',
-          spreadsheetName: GOOGLE_SPREADSHEET_NAME,
-          driveFolderId: GOOGLE_DRIVE_FOLDER_ID,
+          spreadsheetName: driveCfg?.spreadsheetName || GOOGLE_SPREADSHEET_NAME,
+          driveFolderId: driveCfg?.driveFolderId || GOOGLE_DRIVE_FOLDER_ID,
           uid,
           rowIndices: deletedTxs.map((t) => t.rowIndex),
           transactionIds: deletedTxs.map((t) => t.transactionId),
@@ -1233,11 +1588,15 @@ async function deleteFromLiveGoogleSheetIfConfigured(
     return;
   }
 
-  if (!isGoogleCloudConfigured()) return;
+  if (!isGoogleCloudConfigured(userGoogleToken)) return;
 
   try {
-    const accessToken = await getServerGoogleAccessToken();
-    const spreadsheetId = await resolveTargetSpreadsheetId(accessToken);
+    const accessToken = await getServerGoogleAccessToken(userGoogleToken);
+    const spreadsheetId = await resolveTargetSpreadsheetId(accessToken, {
+      driveFolderId: driveCfg?.driveFolderId,
+      spreadsheetName: driveCfg?.spreadsheetName,
+      existingSpreadsheetId: driveCfg?.spreadsheetId,
+    });
     if (!spreadsheetId) return;
 
     for (const tx of deletedTxs) {
@@ -1258,17 +1617,26 @@ async function deleteFromLiveGoogleSheetIfConfigured(
 
 /**
  * Automatically maintains a live JSON synchronization mirror file (`inflowtrack_sync_state.json`)
- * inside the user's `inflowtrack` Google Drive folder (`1vzWhp8o3I_3jbtGvS0NUS2Xo-VdOBYKb`)
+ * inside the user's `inflowtrack` Google Drive folder (`1WTHHDzwzO79ypcP06ZmDkBuDADosnH30`)
  * whenever transactions, categories, or budgets change on the website.
  */
-async function syncStateToDriveFolderIfConfigured(wb: WorkbookStore, uid: string): Promise<void> {
+async function syncStateToDriveFolderIfConfigured(
+  wb: WorkbookStore,
+  uid: string,
+  userGoogleToken?: string
+): Promise<void> {
+  const driveCfg = wb.userDriveConfigs?.[uid];
+  const targetFolderId = driveCfg?.driveFolderId || GOOGLE_DRIVE_FOLDER_ID;
+  const targetFolderUrl = driveCfg?.driveFolderUrl || GOOGLE_DRIVE_FOLDER_URL;
+  const targetSheetName = driveCfg?.spreadsheetName || GOOGLE_SPREADSHEET_NAME;
+
   const snapshotContent = JSON.stringify(
     {
       application: 'inflotrack — Track Save Grow',
-      spreadsheetName: GOOGLE_SPREADSHEET_NAME,
+      spreadsheetName: targetSheetName,
       driveFolderName: GOOGLE_DRIVE_FOLDER_NAME,
-      driveFolderId: GOOGLE_DRIVE_FOLDER_ID,
-      driveFolderUrl: GOOGLE_DRIVE_FOLDER_URL,
+      driveFolderId: targetFolderId,
+      driveFolderUrl: targetFolderUrl,
       syncedAt: new Date().toISOString(),
       ownerUid: uid,
       transactions: wb.transactions.filter((t) => t.uid === uid),
@@ -1284,14 +1652,14 @@ async function syncStateToDriveFolderIfConfigured(wb: WorkbookStore, uid: string
   const localSyncFile = path.join(DRIVE_BACKUPS_DIR, `inflowtrack_sync_${uid}.json`);
   fs.writeFileSync(localSyncFile, snapshotContent, { mode: 0o600 });
 
-  if (!isGoogleCloudConfigured() || !GOOGLE_DRIVE_FOLDER_ID) return;
+  if (!isGoogleCloudConfigured(userGoogleToken) || !targetFolderId) return;
 
   try {
-    const accessToken = await getServerGoogleAccessToken();
+    const accessToken = await getServerGoogleAccessToken(userGoogleToken);
     const syncFileName = 'inflowtrack_sync_state.json';
-    const q = `'${GOOGLE_DRIVE_FOLDER_ID}' in parents and name = '${syncFileName}' and trashed = false`;
+    const q = `'${targetFolderId}' in parents and name = '${syncFileName}' and trashed = false`;
     const searchRes = await fetch(
-      `${DRIVE_BASE_URL}/files?q=${encodeURIComponent(q)}&fields=files(id,name)`,
+      `${DRIVE_BASE_URL}/files?q=${encodeURIComponent(q)}&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=files(id,name)`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
 
@@ -1304,7 +1672,7 @@ async function syncStateToDriveFolderIfConfigured(wb: WorkbookStore, uid: string
     }
 
     if (existingFileId) {
-      await fetch(`${DRIVE_BASE_URL}/files/${existingFileId}?uploadType=media`, {
+      await fetch(`${DRIVE_BASE_URL}/files/${existingFileId}?uploadType=media&supportsAllDrives=true`, {
         method: 'PATCH',
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -1315,7 +1683,7 @@ async function syncStateToDriveFolderIfConfigured(wb: WorkbookStore, uid: string
     } else {
       const metadata = {
         name: syncFileName,
-        parents: [GOOGLE_DRIVE_FOLDER_ID],
+        parents: [targetFolderId],
         mimeType: 'application/json',
       };
       const boundary = '-------InflowtrackSyncBoundary' + Date.now();
@@ -1328,7 +1696,7 @@ async function syncStateToDriveFolderIfConfigured(wb: WorkbookStore, uid: string
         `${snapshotContent}\r\n` +
         `--${boundary}--`;
 
-      await fetch(`${DRIVE_BASE_URL}/files?uploadType=multipart&fields=id,name`, {
+      await fetch(`${DRIVE_BASE_URL}/files?uploadType=multipart&supportsAllDrives=true&fields=id,name`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -1572,7 +1940,7 @@ async function startServer() {
       const wb = loadWorkbook();
       ensureUserRecords(wb, uid);
 
-      await syncFromLiveGoogleSheetsIfConfigured(wb, uid);
+      await syncFromLiveGoogleSheetsIfConfigured(wb, uid, req.googleAccessToken);
       saveWorkbook(wb);
 
       const userTxs = wb.transactions
@@ -1603,21 +1971,30 @@ async function startServer() {
       const catRec = wb.userCategories[uid];
       const secRec = wb.userSecurity[uid];
       const budgetRec = wb.userBudgets[uid];
+      const driveCfg = wb.userDriveConfigs[uid];
       const recurringList = wb.recurringTemplates.filter((r) => r.uid === uid);
 
-      const connectionMode = isGoogleCloudConfigured()
+      const connectionMode = isGoogleCloudConfigured(req.googleAccessToken)
         ? 'google_sheets_api'
         : isAppsScriptConfigured()
         ? 'apps_script'
         : 'local_sheet_workbook';
 
+      const activeSheetId = driveCfg?.spreadsheetId || wb.spreadsheetId;
+      const activeSheetUrl =
+        driveCfg?.spreadsheetUrl ||
+        (activeSheetId && activeSheetId !== 'sheet-inflowtrack-private'
+          ? `https://docs.google.com/spreadsheets/d/${activeSheetId}/edit`
+          : undefined);
+
       res.json({
         sheetInfo: {
-          id: wb.spreadsheetId,
-          name: wb.spreadsheetName,
-          driveFolderId: GOOGLE_DRIVE_FOLDER_ID,
-          driveFolderName: GOOGLE_DRIVE_FOLDER_NAME,
-          driveFolderUrl: GOOGLE_DRIVE_FOLDER_URL,
+          id: activeSheetId,
+          name: driveCfg?.spreadsheetName || wb.spreadsheetName || GOOGLE_SPREADSHEET_NAME,
+          url: activeSheetUrl,
+          driveFolderId: driveCfg?.driveFolderId || GOOGLE_DRIVE_FOLDER_ID,
+          driveFolderName: driveCfg?.driveFolderName || GOOGLE_DRIVE_FOLDER_NAME,
+          driveFolderUrl: driveCfg?.driveFolderUrl || GOOGLE_DRIVE_FOLDER_URL,
           createdTime: new Date().toISOString(),
           transactionsCount: userTxs.length,
           connectionMode,
@@ -1659,6 +2036,275 @@ async function startServer() {
       res.status(503).json({
         error: 'Google Sheets database is temporarily unavailable. Please try again shortly.',
       });
+    }
+  });
+
+  // Update Google Drive Folder Location & Sync/Create inflowtrack Sheet
+  app.post('/api/finance/drive-location', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const uid = req.user!.uid;
+      const { driveFolderUrl, spreadsheetName, createNewSheet } = req.body || {};
+
+      const wb = loadWorkbook();
+      ensureUserRecords(wb, uid);
+
+      const parsedFolder = parseDriveFolderIdFromInput(driveFolderUrl);
+      const cleanSheetName = String(spreadsheetName || GOOGLE_SPREADSHEET_NAME).trim() || GOOGLE_SPREADSHEET_NAME;
+
+      const userDrive = wb.userDriveConfigs[uid];
+      userDrive.driveFolderId = parsedFolder.folderId;
+      userDrive.driveFolderUrl = parsedFolder.folderUrl;
+      userDrive.spreadsheetName = cleanSheetName;
+      userDrive.updatedAt = new Date().toISOString();
+
+      if (isGoogleCloudConfigured(req.googleAccessToken)) {
+        try {
+          const accessToken = await getServerGoogleAccessToken(req.googleAccessToken);
+          const resolvedId = await resolveTargetSpreadsheetId(accessToken, {
+            driveFolderId: userDrive.driveFolderId,
+            spreadsheetName: userDrive.spreadsheetName,
+            existingSpreadsheetId: createNewSheet ? undefined : userDrive.spreadsheetId,
+            forceCreateNew: Boolean(createNewSheet),
+          });
+          if (resolvedId && resolvedId !== 'sheet-inflowtrack-private') {
+            userDrive.spreadsheetId = resolvedId;
+            userDrive.spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${resolvedId}/edit`;
+            wb.spreadsheetId = resolvedId;
+            wb.spreadsheetName = userDrive.spreadsheetName;
+            await populateFullWorkbookToLiveSheet(accessToken, resolvedId, wb, uid);
+          }
+        } catch {
+          // Keep updated Drive folder config even if live API call fails
+        }
+      }
+
+      saveWorkbook(wb);
+      await syncStateToDriveFolderIfConfigured(wb, uid, req.googleAccessToken);
+
+      const userTxsCount = wb.transactions.filter((t) => t.uid === uid).length;
+      res.json({
+        message: `Google Drive folder updated to ${userDrive.driveFolderUrl} and sheet "${userDrive.spreadsheetName}" synced.`,
+        sheetInfo: {
+          id: userDrive.spreadsheetId,
+          name: userDrive.spreadsheetName,
+          url: userDrive.spreadsheetUrl,
+          driveFolderId: userDrive.driveFolderId,
+          driveFolderName: userDrive.driveFolderName,
+          driveFolderUrl: userDrive.driveFolderUrl,
+          createdTime: userDrive.updatedAt,
+          transactionsCount: userTxsCount,
+          connectionMode: isGoogleCloudConfigured(req.googleAccessToken)
+            ? 'google_sheets_api'
+            : 'local_sheet_workbook',
+          ownerUid: uid,
+        },
+      });
+    } catch {
+      res.status(500).json({ error: 'Failed to update Google Drive location.' });
+    }
+  });
+
+  // Create New inflowtrack Sheet in Google Drive Folder Location
+  app.post('/api/finance/sheet/create', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const uid = req.user!.uid;
+      const { driveFolderUrl, spreadsheetName } = req.body || {};
+
+      const wb = loadWorkbook();
+      ensureUserRecords(wb, uid);
+
+      const parsedFolder = parseDriveFolderIdFromInput(
+        driveFolderUrl || wb.userDriveConfigs[uid]?.driveFolderUrl || GOOGLE_DRIVE_FOLDER_URL
+      );
+      const cleanSheetName =
+        String(spreadsheetName || wb.userDriveConfigs[uid]?.spreadsheetName || GOOGLE_SPREADSHEET_NAME).trim() ||
+        GOOGLE_SPREADSHEET_NAME;
+
+      const userDrive = wb.userDriveConfigs[uid];
+      userDrive.driveFolderId = parsedFolder.folderId;
+      userDrive.driveFolderUrl = parsedFolder.folderUrl;
+      userDrive.spreadsheetName = cleanSheetName;
+      userDrive.updatedAt = new Date().toISOString();
+
+      let createdLiveInDrive = false;
+      if (isGoogleCloudConfigured(req.googleAccessToken)) {
+        try {
+          const accessToken = await getServerGoogleAccessToken(req.googleAccessToken);
+          const createdId = await resolveTargetSpreadsheetId(accessToken, {
+            driveFolderId: userDrive.driveFolderId,
+            spreadsheetName: userDrive.spreadsheetName,
+            forceCreateNew: true,
+          });
+          if (createdId && createdId !== 'sheet-inflowtrack-private') {
+            userDrive.spreadsheetId = createdId;
+            userDrive.spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${createdId}/edit`;
+            wb.spreadsheetId = createdId;
+            wb.spreadsheetName = userDrive.spreadsheetName;
+            await populateFullWorkbookToLiveSheet(accessToken, createdId, wb, uid);
+            createdLiveInDrive = true;
+          }
+        } catch {
+          // Fallback to local workbook metadata if Drive API rejects
+        }
+      }
+
+      saveWorkbook(wb);
+      await syncStateToDriveFolderIfConfigured(wb, uid, req.googleAccessToken);
+
+      const userTxsCount = wb.transactions.filter((t) => t.uid === uid).length;
+      res.status(201).json({
+        message: createdLiveInDrive
+          ? `Created new sheet "${userDrive.spreadsheetName}" inside your Google Drive folder (${userDrive.driveFolderId}) and synced ${userTxsCount} transactions.`
+          : `Initialized "${userDrive.spreadsheetName}" workbook for Google Drive folder (${userDrive.driveFolderId}). Sign in with Google to sync directly to Google Drive.`,
+        sheetInfo: {
+          id: userDrive.spreadsheetId,
+          name: userDrive.spreadsheetName,
+          url: userDrive.spreadsheetUrl,
+          driveFolderId: userDrive.driveFolderId,
+          driveFolderName: userDrive.driveFolderName,
+          driveFolderUrl: userDrive.driveFolderUrl,
+          createdTime: userDrive.updatedAt,
+          transactionsCount: userTxsCount,
+          connectionMode: createdLiveInDrive ? 'google_sheets_api' : 'local_sheet_workbook',
+          ownerUid: uid,
+        },
+      });
+    } catch {
+      res.status(500).json({ error: 'Failed to create new inflowtrack sheet in Google Drive.' });
+    }
+  });
+
+  // Store & Download inflowtrack Sheet (Syncs to Drive folder 1WTHHDzwzO79ypcP06ZmDkBuDADosnH30 + Downloads .xlsx / .csv)
+  app.post('/api/finance/sheet/download', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const uid = req.user!.uid;
+      const { driveFolderUrl, spreadsheetName } = req.body || {};
+
+      const wb = loadWorkbook();
+      ensureUserRecords(wb, uid);
+
+      const userDrive = wb.userDriveConfigs[uid];
+      if (driveFolderUrl) {
+        const parsed = parseDriveFolderIdFromInput(driveFolderUrl);
+        userDrive.driveFolderId = parsed.folderId;
+        userDrive.driveFolderUrl = parsed.folderUrl;
+      }
+      if (spreadsheetName && String(spreadsheetName).trim()) {
+        userDrive.spreadsheetName = String(spreadsheetName).trim();
+      }
+      userDrive.updatedAt = new Date().toISOString();
+
+      let syncedToDrive = false;
+      let exportedXlsxBuffer: Buffer | null = null;
+
+      // 1. Store / Sync to Google Drive folder & Export live Google Sheet (.xlsx) if Google OAuth / Cloud credentials exist
+      if (isGoogleCloudConfigured(req.googleAccessToken)) {
+        try {
+          const accessToken = await getServerGoogleAccessToken(req.googleAccessToken);
+          const spreadsheetId = await resolveTargetSpreadsheetId(accessToken, {
+            driveFolderId: userDrive.driveFolderId,
+            spreadsheetName: userDrive.spreadsheetName,
+            existingSpreadsheetId: userDrive.spreadsheetId,
+          });
+
+          if (spreadsheetId && spreadsheetId !== 'sheet-inflowtrack-private') {
+            userDrive.spreadsheetId = spreadsheetId;
+            userDrive.spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+            wb.spreadsheetId = spreadsheetId;
+            wb.spreadsheetName = userDrive.spreadsheetName;
+
+            await populateFullWorkbookToLiveSheet(accessToken, spreadsheetId, wb, uid);
+            syncedToDrive = true;
+
+            // Export the Google Sheet as an Excel .xlsx file from Google Drive
+            const exportUrl = `${DRIVE_BASE_URL}/files/${encodeURIComponent(
+              spreadsheetId
+            )}/export?mimeType=${encodeURIComponent(
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )}`;
+            const exportRes = await fetch(exportUrl, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            });
+            if (exportRes.ok) {
+              const arrayBuf = await exportRes.arrayBuffer();
+              exportedXlsxBuffer = Buffer.from(arrayBuf);
+            }
+          }
+        } catch {
+          // Fall back to local CSV generation below if Google API export fails
+        }
+      }
+
+      saveWorkbook(wb);
+      await syncStateToDriveFolderIfConfigured(wb, uid, req.googleAccessToken);
+
+      const safeSheetName = (userDrive.spreadsheetName || GOOGLE_SPREADSHEET_NAME).replace(/[^a-zA-Z0-9_-]/g, '_');
+
+      if (exportedXlsxBuffer) {
+        const xlsxFilename = `${safeSheetName}.xlsx`;
+        res.setHeader(
+          'Content-Type',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+        res.setHeader('Content-Disposition', `attachment; filename="${xlsxFilename}"`);
+        res.setHeader('X-Drive-Synced', syncedToDrive ? 'true' : 'false');
+        res.send(exportedXlsxBuffer);
+        return;
+      }
+
+      // 2. Fallback: Generate complete Excel-compatible CSV sheet (`inflowtrack.csv`) and also upload to Drive folder if token present
+      const userTxs = wb.transactions
+        .filter((t) => t.uid === uid)
+        .sort((a, b) => b.date.localeCompare(a.date));
+
+      const csvHeaders = [
+        'Date (DD-MM-YYYY)',
+        'Time',
+        'Type',
+        'Category',
+        'Subcategory',
+        'Amount (INR)',
+        'Payment Mode',
+        'Account / Wallet',
+        'Description',
+        'Sheet Tab',
+        'Transaction ID',
+        'Drive Folder ID',
+      ];
+
+      const escapeCsv = (val: unknown) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+      const csvRows = userTxs.map((tx) =>
+        [
+          escapeCsv(formatDateToDDMMYYYY(tx.date)),
+          escapeCsv(tx.time || ''),
+          escapeCsv(tx.type),
+          escapeCsv(tx.category),
+          escapeCsv(tx.subcategory || ''),
+          tx.amount,
+          escapeCsv(tx.paymentMode),
+          escapeCsv(tx.account),
+          escapeCsv(tx.description),
+          escapeCsv(tx.sheetName),
+          escapeCsv(tx.transactionId),
+          escapeCsv(userDrive.driveFolderId),
+        ].join(',')
+      );
+
+      // Include UTF-8 BOM so Microsoft Excel opens ₹ symbol and columns cleanly
+      const csvContent = '\uFEFF' + [csvHeaders.join(','), ...csvRows].join('\r\n');
+      const csvFilename = `${safeSheetName}.csv`;
+
+      // Save a backup copy in local Drive backups directory as well
+      const bkpId = `bkp_sheet_${Date.now()}`;
+      const bkpPath = path.join(DRIVE_BACKUPS_DIR, `${bkpId}_${csvFilename}`);
+      fs.writeFileSync(bkpPath, csvContent, { mode: 0o600 });
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${csvFilename}"`);
+      res.setHeader('X-Drive-Synced', syncedToDrive ? 'true' : 'false');
+      res.send(csvContent);
+    } catch {
+      res.status(500).json({ error: 'Failed to store and download inflowtrack sheet.' });
     }
   });
 
@@ -1713,11 +2359,11 @@ async function startServer() {
         updatedAt: nowIso,
       };
 
-      await appendToLiveGoogleSheetIfConfigured(newTx);
+      await appendToLiveGoogleSheetIfConfigured(newTx, req.googleAccessToken, wb.userDriveConfigs[uid]);
 
       wb.transactions.push(newTx);
       saveWorkbook(wb);
-      await syncStateToDriveFolderIfConfigured(wb, uid);
+      await syncStateToDriveFolderIfConfigured(wb, uid, req.googleAccessToken);
 
       res.status(201).json({
         transaction: {
@@ -1787,8 +2433,8 @@ async function startServer() {
 
       wb.transactions[txIdx] = updatedTx;
       saveWorkbook(wb);
-      await updateInLiveGoogleSheetIfConfigured(updatedTx);
-      await syncStateToDriveFolderIfConfigured(wb, uid);
+      await updateInLiveGoogleSheetIfConfigured(updatedTx, req.googleAccessToken, wb.userDriveConfigs[uid]);
+      await syncStateToDriveFolderIfConfigured(wb, uid, req.googleAccessToken);
 
       res.json({ transaction: updatedTx });
     } catch {
@@ -1838,8 +2484,8 @@ async function startServer() {
         (t) => !(t.uid === uid && rowIndicesToDelete.has(t.rowIndex))
       );
       saveWorkbook(wb);
-      await deleteFromLiveGoogleSheetIfConfigured(deletedRows, uid);
-      await syncStateToDriveFolderIfConfigured(wb, uid);
+      await deleteFromLiveGoogleSheetIfConfigured(deletedRows, uid, req.googleAccessToken, wb.userDriveConfigs[uid]);
+      await syncStateToDriveFolderIfConfigured(wb, uid, req.googleAccessToken);
 
       res.json({ success: true, deletedCount: rowIndicesToDelete.size });
     } catch {
@@ -2315,14 +2961,15 @@ async function startServer() {
       fs.writeFileSync(filePath, fileContent, { mode: 0o600 });
       const sizeBytes = Buffer.byteLength(fileContent, 'utf-8');
 
-      // If Google Cloud Service Account / Refresh Token & GOOGLE_DRIVE_FOLDER_ID are configured, upload private file to Google Drive
+      // If Google Cloud Service Account / Refresh Token / User OAuth Token & Drive Folder ID are configured, upload private file to Google Drive
+      const activeDriveFolderId = wb.userDriveConfigs[uid]?.driveFolderId || GOOGLE_DRIVE_FOLDER_ID;
       let driveFileId: string | undefined;
-      if (isGoogleCloudConfigured() && GOOGLE_DRIVE_FOLDER_ID) {
+      if (isGoogleCloudConfigured(req.googleAccessToken) && activeDriveFolderId) {
         try {
-          const accessToken = await getServerGoogleAccessToken();
+          const accessToken = await getServerGoogleAccessToken(req.googleAccessToken);
           const metadata = {
             name: fileName,
-            parents: [GOOGLE_DRIVE_FOLDER_ID],
+            parents: [activeDriveFolderId],
             mimeType: 'application/json',
           };
           const boundary = '-------FinanceFlowDriveBoundary' + Date.now();
@@ -2335,14 +2982,17 @@ async function startServer() {
             `${fileContent}\r\n` +
             `--${boundary}--`;
 
-          const driveRes = await fetch(`${DRIVE_BASE_URL}/files?uploadType=multipart&fields=id,name`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              'Content-Type': `multipart/related; boundary=${boundary}`,
-            },
-            body: multipartBody,
-          });
+          const driveRes = await fetch(
+            `${DRIVE_BASE_URL}/files?uploadType=multipart&supportsAllDrives=true&fields=id,name`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': `multipart/related; boundary=${boundary}`,
+              },
+              body: multipartBody,
+            }
+          );
           if (driveRes.ok) {
             const driveData = await driveRes.json();
             driveFileId = driveData.id;

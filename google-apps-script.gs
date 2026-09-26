@@ -20,6 +20,42 @@
 
 const SHARED_SERVER_SECRET = PropertiesService.getScriptProperties().getProperty('GOOGLE_APPS_SCRIPT_SECRET') || '';
 const SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty('GOOGLE_SPREADSHEET_ID') || '';
+const DRIVE_FOLDER_ID =
+  PropertiesService.getScriptProperties().getProperty('GOOGLE_DRIVE_FOLDER_ID') ||
+  '1WTHHDzwzO79ypcP06ZmDkBuDADosnH30';
+const SPREADSHEET_NAME =
+  PropertiesService.getScriptProperties().getProperty('GOOGLE_SPREADSHEET_NAME') ||
+  'inflowtrack';
+
+function getOrCreateInflowtrackSpreadsheet(customFolderId, customSheetName) {
+  var folderId = customFolderId || DRIVE_FOLDER_ID;
+  var sheetName = customSheetName || SPREADSHEET_NAME;
+
+  if (SPREADSHEET_ID && !customFolderId && !customSheetName) {
+    try {
+      return SpreadsheetApp.openById(SPREADSHEET_ID);
+    } catch (e) {
+      // Fallback to locating or creating in Drive folder
+    }
+  }
+
+  var folder = DriveApp.getFolderById(folderId);
+  var files = folder.getFilesByName(sheetName);
+  if (files.hasNext()) {
+    var existingFile = files.next();
+    return SpreadsheetApp.openById(existingFile.getId());
+  }
+
+  var createdSs = SpreadsheetApp.create(sheetName);
+  var createdFile = DriveApp.getFileById(createdSs.getId());
+  folder.addFile(createdFile);
+  try {
+    DriveApp.getRootFolder().removeFile(createdFile);
+  } catch (e) {
+    // Ignore if move API differs
+  }
+  return createdSs;
+}
 
 function doPost(e) {
   try {
@@ -40,7 +76,7 @@ function doPost(e) {
       return jsonResponse({ error: 'Missing verified Firebase UID' }, 401);
     }
 
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const ss = getOrCreateInflowtrackSpreadsheet(payload.driveFolderId, payload.spreadsheetName);
     const action = payload.action;
 
     if (action === 'READ_USER_DATA') {

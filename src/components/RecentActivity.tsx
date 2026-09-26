@@ -3,18 +3,10 @@
  * File: src/components/RecentActivity.tsx
  * Application: inflotrack — Track Save Grow
  * Purpose:
- *   Interactive Transactions table (Desktop) and card list (Mobile) with
- *   search, category filtering, bulk selection/deletion, CSV export,
+ *   Interactive Transactions ledger styled after the Aurora neobank reference
+ *   image: rounded-[28px] white surface card, soft stone icon badges (#F4F3EF),
+ *   Poppins typography, category & search filters, bulk actions, CSV export,
  *   inline record editing, and recurring transaction management.
- *
- * Key Responsibilities:
- *   1. Scopes transactions to the selected dashboard month and filters by
- *      search query or category.
- *   2. Provides single and bulk deletion of rows from Google Sheets with a
- *      confirmation dialog.
- *   3. Opens `<EditTransactionModal />` to modify any Google Sheet row and
- *      `<RecurringModal />` to manage monthly recurring templates.
- *   4. Exports filtered records to a downloadable `.csv` file.
  * ============================================================================
  */
 
@@ -80,6 +72,8 @@ interface RecentActivityProps {
     accountWallet?: string;
     description: string;
   }) => Promise<void>;
+  onDownloadSheet?: () => Promise<void>;
+  isDownloadingSheet?: boolean;
   sheetUrl?: string;
 }
 
@@ -98,6 +92,8 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
   onDeleteTransactionsBatch,
   onUpdateTransaction,
   onApplyRecurring,
+  onDownloadSheet,
+  isDownloadingSheet = false,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('ALL');
@@ -303,61 +299,61 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
     switch (type) {
       case 'Income':
         return {
-          textColor: 'text-emerald-600 dark:text-emerald-400',
-          badgeBg:
-            'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+          textColor: 'text-[#4A5240] dark:text-[#A3B18A]',
+          amountColor: 'text-[#4A5240] dark:text-[#A3B18A]',
+          iconBg: 'bg-[#F4F3EF] dark:bg-[#22221F] text-[#4A5240] dark:text-[#A3B18A]',
           sign: '+',
-          icon: <TrendingUp className="w-3 h-3" />,
+          icon: <TrendingUp className="w-4 h-4" />,
         };
       case 'Expense':
         return {
-          textColor: 'text-rose-600 dark:text-rose-400',
-          badgeBg:
-            'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800',
+          textColor: 'text-[#8C7355] dark:text-[#D4A373]',
+          amountColor: 'text-[#181816] dark:text-[#F4F3EF]',
+          iconBg: 'bg-[#F4F3EF] dark:bg-[#22221F] text-[#181816] dark:text-[#F4F3EF]',
           sign: '−',
-          icon: <TrendingDown className="w-3 h-3" />,
+          icon: <TrendingDown className="w-4 h-4" />,
         };
       case 'Transfer':
         return {
-          textColor: 'text-indigo-600 dark:text-indigo-400',
-          badgeBg:
-            'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800',
+          textColor: 'text-[#7A8270] dark:text-[#9CA38F]',
+          amountColor: 'text-[#181816] dark:text-[#F4F3EF]',
+          iconBg: 'bg-[#F4F3EF] dark:bg-[#22221F] text-[#7A8270] dark:text-[#9CA38F]',
           sign: '⇄',
-          icon: <ArrowLeftRight className="w-3 h-3" />,
+          icon: <ArrowLeftRight className="w-4 h-4" />,
         };
       case 'Savings':
         return {
-          textColor: 'text-blue-600 dark:text-blue-400',
-          badgeBg:
-            'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800',
+          textColor: 'text-[#4A5240] dark:text-[#A3B18A]',
+          amountColor: 'text-[#4A5240] dark:text-[#A3B18A]',
+          iconBg: 'bg-[#F4F3EF] dark:bg-[#22221F] text-[#4A5240] dark:text-[#A3B18A]',
           sign: '•',
-          icon: <PiggyBank className="w-3 h-3" />,
+          icon: <PiggyBank className="w-4 h-4" />,
         };
       case 'Emergency Fund':
         return {
-          textColor: 'text-amber-600 dark:text-amber-400',
-          badgeBg:
-            'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+          textColor: 'text-[#8C7355] dark:text-[#D4A373]',
+          amountColor: 'text-[#8C7355] dark:text-[#D4A373]',
+          iconBg: 'bg-[#F4F3EF] dark:bg-[#22221F] text-[#8C7355] dark:text-[#D4A373]',
           sign: '•',
-          icon: <ShieldCheck className="w-3 h-3" />,
+          icon: <ShieldCheck className="w-4 h-4" />,
         };
       case 'Lent':
       case 'Borrowed':
       case 'Lent & Borrowed':
         return {
-          textColor: 'text-purple-600 dark:text-purple-400',
-          badgeBg:
-            'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800',
+          textColor: 'text-[#6E5648] dark:text-[#C9ADA7]',
+          amountColor: 'text-[#6E5648] dark:text-[#C9ADA7]',
+          iconBg: 'bg-[#F4F3EF] dark:bg-[#22221F] text-[#6E5648] dark:text-[#C9ADA7]',
           sign: '⇄',
-          icon: <ArrowLeftRight className="w-3 h-3" />,
+          icon: <ArrowLeftRight className="w-4 h-4" />,
         };
       default:
         return {
-          textColor: 'text-slate-700 dark:text-slate-300',
-          badgeBg:
-            'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700',
+          textColor: 'text-[#78756E] dark:text-[#9C9990]',
+          amountColor: 'text-[#181816] dark:text-[#F4F3EF]',
+          iconBg: 'bg-[#F4F3EF] dark:bg-[#22221F] text-[#78756E]',
           sign: '',
-          icon: null,
+          icon: <Receipt className="w-4 h-4" />,
         };
     }
   };
@@ -367,54 +363,67 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
   return (
     <div
       id="recent-activity-card"
-      className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden flex flex-col transition-colors"
+      className="bg-white dark:bg-[#181816] rounded-[28px] border border-[#E2DFD9] dark:border-[#2A2A27] overflow-hidden flex flex-col transition-colors shadow-xs"
     >
-      {/* 1. Header with Title and Quick Action Tools */}
-      <div className="px-4 sm:px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-            <Receipt className="w-4 h-4" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-              Transactions
-              <span className="text-[11px] font-semibold px-2 py-0.5 bg-slate-200/80 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-md">
-                {scopedTransactions.length} {scopedTransactions.length === 1 ? 'entry' : 'entries'}
-              </span>
-            </h3>
-          </div>
+      {/* 1. Header with "Transactions" Title and Action Pills */}
+      <div className="px-5 sm:px-6 py-5 border-b border-[#EFECE6] dark:border-[#22221F] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center justify-between sm:justify-start gap-3">
+          <h3 className="text-base sm:text-lg font-semibold text-[#181816] dark:text-[#F4F3EF] tracking-tight">
+            Transactions
+          </h3>
+          <span className="text-xs font-medium text-[#8C8980] dark:text-[#78756E] px-2.5 py-0.5 rounded-full bg-[#F4F3EF] dark:bg-[#22221F] tabular-nums">
+            {scopedTransactions.length} {scopedTransactions.length === 1 ? 'item' : 'items'}
+          </span>
         </div>
 
-        {/* Quick Action Tools: Recurring Manager, Export CSV */}
+        {/* Quick Action Tools: Recurring Manager, Store & Download Sheet */}
         <div className="flex flex-wrap items-center gap-2">
           {onApplyRecurring && (
             <button
               type="button"
               id="btn-recurring-manager"
               onClick={() => setIsRecurringOpen(true)}
-              className="py-1.5 px-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/60 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="py-2 px-3.5 bg-[#F4F3EF] dark:bg-[#22221F] hover:bg-[#E5E2DC] dark:hover:bg-[#2C2C28] rounded-full text-xs font-medium text-[#181816] dark:text-[#F4F3EF] flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
             >
-              <Repeat className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <Repeat className="w-3.5 h-3.5 text-[#78756E]" />
               Recurring
             </button>
           )}
 
           <button
             type="button"
+            id="btn-download-sheet"
+            onClick={() => {
+              if (onDownloadSheet) {
+                void onDownloadSheet();
+              } else {
+                handleExportCSV();
+              }
+            }}
+            disabled={isDownloadingSheet}
+            title="Store in Google Drive folder (1WTHHDzwzO79ypcP06ZmDkBuDADosnH30) and download inflowtrack sheet"
+            className="py-2 px-4 bg-[#181816] hover:bg-[#2A2A26] dark:bg-[#F4F3EF] dark:hover:bg-[#E5E2DC] text-white dark:text-[#181816] rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+          >
+            <Download className="w-3.5 h-3.5" />
+            {isDownloadingSheet ? 'Exporting...' : 'Download Sheet'}
+          </button>
+
+          <button
+            type="button"
             id="btn-export-csv"
             onClick={handleExportCSV}
             disabled={filteredTransactions.length === 0}
-            title="Download records as Excel / CSV"
-            className="py-1.5 px-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/60 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40"
+            title="Download filtered view as CSV"
+            className="py-2 px-3.5 bg-[#F4F3EF] dark:bg-[#22221F] hover:bg-[#E5E2DC] dark:hover:bg-[#2C2C28] rounded-full text-xs font-medium text-[#181816] dark:text-[#F4F3EF] flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 whitespace-nowrap"
           >
-            <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <Download className="w-3.5 h-3.5 text-[#78756E]" />
             Export CSV
           </button>
         </div>
       </div>
 
       {actionError && (
-        <div className="px-4 py-2.5 bg-rose-50 dark:bg-rose-950/60 border-b border-rose-200 dark:border-rose-800 flex items-center justify-between text-xs font-medium text-rose-700 dark:text-rose-300">
+        <div className="px-5 py-2.5 bg-rose-50 dark:bg-rose-950/60 border-b border-rose-200 dark:border-rose-800 flex items-center justify-between text-xs font-medium text-rose-700 dark:text-rose-300">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{actionError}</span>
@@ -429,19 +438,19 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
         </div>
       )}
 
-      {/* 3. Search, Category Filter, and Selection Bar */}
-      <div className="px-4 sm:px-5 py-3 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2.5">
+      {/* 2. Search, Category Filter, and Selection Bar */}
+      <div className="px-5 sm:px-6 py-3.5 border-b border-[#EFECE6] dark:border-[#22221F] flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[240px]">
           {/* Search box */}
           <div className="relative flex-1 max-w-sm">
-            <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3 top-2.5 pointer-events-none" />
+            <Search className="w-4 h-4 text-[#8C8980] absolute left-3.5 top-2.5 pointer-events-none" />
             <input
               type="text"
               id="recent-search-input"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search description, category, or wallet..."
-              className="w-full pl-9 pr-8 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+              placeholder="Search category, description, or wallet..."
+              className="w-full pl-9 pr-8 py-2 bg-[#F4F3EF] dark:bg-[#22221F] border border-[#E2DFD9] dark:border-[#2E2E2A] rounded-full text-xs text-[#181816] dark:text-[#F4F3EF] placeholder-[#8C8980] focus:outline-none focus:ring-2 focus:ring-[#4A5240] transition-all"
             />
             {searchTerm && (
               <button
@@ -449,7 +458,7 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
                 id="btn-clear-search"
                 onClick={() => setSearchTerm('')}
                 title="Clear search"
-                className="absolute right-2.5 top-2.5 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                className="absolute right-2.5 top-2 p-0.5 text-[#8C8980] hover:text-[#181816] dark:hover:text-white rounded-full transition-colors cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -458,14 +467,14 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
 
           {/* Category Filter Dropdown */}
           <div className="flex items-center gap-1.5">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
+            <Filter className="w-3.5 h-3.5 text-[#8C8980]" />
             <select
               id="recent-category-filter"
               value={selectedCategoryFilter}
               onChange={(e) => setSelectedCategoryFilter(e.target.value)}
-              className="py-2 px-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              className="py-2 px-3.5 bg-[#F4F3EF] dark:bg-[#22221F] border border-[#E2DFD9] dark:border-[#2E2E2A] rounded-full text-xs font-medium text-[#181816] dark:text-[#F4F3EF] focus:outline-none focus:ring-2 focus:ring-[#4A5240] cursor-pointer"
             >
-              <option value="ALL">All Categories</option>
+              <option value="ALL">View all</option>
               {availableFilterCategories.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -476,7 +485,7 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
 
           {/* Real-time Match Indicator */}
           {(searchTerm || selectedCategoryFilter !== 'ALL') && (
-            <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 px-2 py-1 rounded-lg">
+            <span className="text-[11px] font-medium text-[#4A5240] dark:text-[#A3B18A] bg-[#F4F3EF] dark:bg-[#22221F] px-3 py-1 rounded-full">
               {filteredTransactions.length} of {scopedTransactions.length}{' '}
               {filteredTransactions.length === 1 ? 'match' : 'matches'}
             </span>
@@ -490,15 +499,15 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
               type="button"
               id="btn-delete-selected-transactions"
               onClick={handleTriggerBulkDelete}
-              className="py-1.5 px-3 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer animate-fadeIn"
+              className="py-1.5 px-3.5 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white text-xs font-medium rounded-full shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
             >
-              <Trash2 className="w-3.5 h-3.5 stroke-[2.5]" />
+              <Trash2 className="w-3.5 h-3.5" />
               <span>Delete Selected ({selectedCount})</span>
             </button>
             <button
               type="button"
               onClick={handleClearSelection}
-              className="py-1.5 px-2 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors cursor-pointer"
+              className="py-1.5 px-2 text-xs font-medium text-[#78756E] hover:text-[#181816] dark:hover:text-white transition-colors cursor-pointer"
             >
               Clear
             </button>
@@ -508,19 +517,19 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
 
       {/* Mobile Select All Bar */}
       {filteredTransactions.length > 0 && (
-        <div className="md:hidden px-4 py-2 bg-slate-100/80 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-          <label className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+        <div className="md:hidden px-5 py-2.5 bg-[#FAF9F6] dark:bg-[#1E1E1B] border-b border-[#EFECE6] dark:border-[#22221F] flex items-center justify-between">
+          <label className="flex items-center gap-2 text-xs font-medium text-[#181816] dark:text-[#F4F3EF] cursor-pointer">
             <input
               type="checkbox"
               checked={isAllSelected}
               onChange={handleToggleSelectAll}
-              className="w-4 h-4 text-indigo-600 rounded border-slate-300 dark:border-slate-700 focus:ring-indigo-500 cursor-pointer"
+              className="w-4 h-4 accent-[#181816] rounded border-[#D5D2CA] cursor-pointer"
             />
             <span>Select All ({filteredTransactions.length})</span>
           </label>
 
           {selectedCount > 0 && (
-            <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
+            <span className="text-[11px] font-semibold text-[#4A5240] dark:text-[#A3B18A]">
               {selectedCount} selected
             </span>
           )}
@@ -531,21 +540,23 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
       {transactions.length === 0 ? (
         <div
           id="empty-transactions-container"
-          className="py-12 flex flex-col items-center justify-center text-center bg-white dark:bg-slate-900 p-6"
+          className="py-14 flex flex-col items-center justify-center text-center p-6"
         >
-          <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-3">
-            <Receipt className="w-6 h-6" />
+          <div className="w-12 h-12 rounded-2xl bg-[#F4F3EF] dark:bg-[#22221F] flex items-center justify-center text-[#78756E] mb-3">
+            <Receipt className="w-5 h-5" />
           </div>
-          <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">No transactions yet.</h4>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm">
-            Your transactions sheet is ready. Record your first entry or set up recurring items.
+          <h4 className="text-sm font-semibold text-[#181816] dark:text-[#F4F3EF]">
+            No transactions yet
+          </h4>
+          <p className="text-xs text-[#78756E] dark:text-[#9C9990] mt-1 max-w-sm">
+            Your inflowtrack sheet is connected. Add your first transaction or configure recurring items.
           </p>
           {onAddNewClick && (
             <button
               type="button"
               id="btn-empty-add-transaction"
               onClick={onAddNewClick}
-              className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="mt-4 px-5 py-2.5 bg-[#181816] hover:bg-[#2A2A26] dark:bg-[#F4F3EF] text-white dark:text-[#181816] text-xs font-medium rounded-full flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Add Transaction</span>
@@ -553,14 +564,14 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
           )}
         </div>
       ) : filteredTransactions.length === 0 ? (
-        <div className="py-12 flex flex-col items-center justify-center text-center bg-white dark:bg-slate-900 p-6">
-          <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-2.5">
+        <div className="py-12 flex flex-col items-center justify-center text-center p-6">
+          <div className="w-11 h-11 rounded-2xl bg-[#F4F3EF] dark:bg-[#22221F] flex items-center justify-center text-[#78756E] mb-2.5">
             <Search className="w-5 h-5" />
           </div>
-          <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
+          <p className="text-xs font-semibold text-[#181816] dark:text-[#F4F3EF]">
             No transactions match "{searchTerm || selectedCategoryFilter}"
           </p>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
+          <p className="text-[11px] text-[#8C8980] mt-0.5">
             Try adjusting your search terms or category filter.
           </p>
           <button
@@ -569,7 +580,7 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
               setSearchTerm('');
               setSelectedCategoryFilter('ALL');
             }}
-            className="mt-3 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+            className="mt-3 px-4 py-1.5 bg-[#F4F3EF] dark:bg-[#22221F] hover:bg-[#E5E2DC] text-[#181816] dark:text-[#F4F3EF] text-xs font-medium rounded-full transition-colors cursor-pointer"
           >
             Clear Filters
           </button>
@@ -579,50 +590,50 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
           {/* Desktop Table View */}
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
-              <thead className="sticky top-0 bg-white dark:bg-slate-900 shadow-2xs z-10">
-                <tr className="text-slate-400 dark:text-slate-500 uppercase font-bold text-[10px] tracking-wider border-b border-slate-100 dark:border-slate-800">
-                  {/* Select All Checkbox Column */}
-                  <th className="w-10 px-4 py-3 text-center">
+              <thead className="bg-[#FAF9F6] dark:bg-[#1E1E1B] border-b border-[#EFECE6] dark:border-[#22221F]">
+                <tr className="text-[#8C8980] dark:text-[#78756E] uppercase font-medium text-[10px] tracking-wider">
+                  <th className="w-10 px-4 py-3.5 text-center">
                     <button
                       type="button"
                       onClick={handleToggleSelectAll}
                       title={isAllSelected ? 'Deselect all' : 'Select all'}
-                      className="p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 rounded transition-colors cursor-pointer inline-flex items-center justify-center"
+                      className="p-1 text-[#8C8980] hover:text-[#181816] dark:hover:text-white rounded transition-colors cursor-pointer inline-flex items-center justify-center"
                     >
                       {isAllSelected ? (
-                        <CheckSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                        <CheckSquare className="w-4 h-4 text-[#181816] dark:text-[#F4F3EF]" />
                       ) : isSomeSelected ? (
-                        <MinusSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                        <MinusSquare className="w-4 h-4 text-[#181816] dark:text-[#F4F3EF]" />
                       ) : (
                         <Square className="w-4 h-4" />
                       )}
                     </button>
                   </th>
-                  <th className="px-4 py-3 font-semibold">Date & Time</th>
-                  <th className="px-4 py-3 font-semibold">Category</th>
-                  <th className="px-4 py-3 font-semibold">Type</th>
-                  <th className="px-4 py-3 font-semibold">Payment / Account</th>
-                  <th className="px-4 py-3 font-semibold">Description</th>
-                  <th className="px-5 py-3 text-right font-semibold">Amount</th>
-                  <th className="px-4 py-3 text-center font-semibold">Modify / Actions</th>
+                  <th className="px-4 py-3.5 font-medium">Transaction</th>
+                  <th className="px-4 py-3.5 font-medium">Date & Time</th>
+                  <th className="px-4 py-3.5 font-medium">Type</th>
+                  <th className="px-4 py-3.5 font-medium">Payment / Account</th>
+                  <th className="px-4 py-3.5 font-medium">Notes</th>
+                  <th className="px-5 py-3.5 text-right font-medium">Amount</th>
+                  <th className="px-4 py-3.5 text-center font-medium">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50 dark:divide-slate-800/60">
+              <tbody className="divide-y divide-[#F2EFE9] dark:divide-[#22221F]">
                 {filteredTransactions.map((tx) => {
                   const style = getTypeStyle(tx.type);
-                  const isSelected = tx.rowIndex !== undefined && selectedRowIndices.has(tx.rowIndex);
+                  const isSelected =
+                    tx.rowIndex !== undefined && selectedRowIndices.has(tx.rowIndex);
 
                   return (
                     <tr
                       key={tx.id || `${tx.date}-${tx.amount}-${tx.rowIndex}`}
                       className={`transition-colors group ${
                         isSelected
-                          ? 'bg-indigo-50/70 dark:bg-indigo-950/40'
-                          : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/50'
+                          ? 'bg-[#F4F3EF] dark:bg-[#262622]'
+                          : 'hover:bg-[#FAF9F6] dark:hover:bg-[#1E1E1B]'
                       }`}
                     >
                       {/* Checkbox Column */}
-                      <td className="w-10 px-4 py-3 text-center">
+                      <td className="w-10 px-4 py-3.5 text-center">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -631,84 +642,98 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
                               handleToggleSelectRow(tx.rowIndex);
                             }
                           }}
-                          className="w-4 h-4 text-indigo-600 rounded border-slate-300 dark:border-slate-700 focus:ring-indigo-500 cursor-pointer"
+                          className="w-4 h-4 accent-[#181816] rounded border-[#D5D2CA] cursor-pointer"
                         />
                       </td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                        <div className="font-semibold font-mono text-xs text-slate-800 dark:text-slate-200">
+
+                      {/* Category with rounded stone icon badge */}
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${style.iconBg}`}
+                          >
+                            {style.icon}
+                          </div>
+                          <div>
+                            <div className="font-semibold text-xs text-[#181816] dark:text-[#F4F3EF]">
+                              {tx.category}
+                            </div>
+                            {tx.subcategory && (
+                              <div className="text-[11px] text-[#8C8980]">
+                                {tx.subcategory}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3.5 text-[#78756E] whitespace-nowrap">
+                        <div className="font-medium tabular-nums text-xs text-[#181816] dark:text-[#E5E2DC]">
                           {formatDateToDDMMYYYY(tx.date)}
                         </div>
                         {tx.time && (
-                          <div className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
+                          <div className="text-[10px] tabular-nums text-[#8C8980]">
                             {tx.time}
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-slate-900 dark:text-slate-100">
-                          {tx.category}
-                        </div>
-                        {tx.subcategory && (
-                          <div className="text-[10px] font-medium text-slate-400 dark:text-slate-500">
-                            {tx.subcategory}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[10px] font-bold ${style.badgeBg}`}
-                        >
-                          {style.icon}
+
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <span className={`text-xs font-medium ${style.textColor}`}>
                           {tx.type}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-400 text-[11px] whitespace-nowrap">
+
+                      <td className="px-4 py-3.5 text-[#78756E] text-xs whitespace-nowrap">
                         {tx.paymentMode || tx.accountWallet ? (
-                          <div>
+                          <div className="flex items-center gap-1.5">
                             {tx.paymentMode && (
-                              <span className="font-semibold text-slate-700 dark:text-slate-300">
+                              <span className="font-medium text-[#181816] dark:text-[#E5E2DC]">
                                 {tx.paymentMode}
                               </span>
                             )}
+                            {tx.paymentMode && tx.accountWallet && (
+                              <span className="text-[#C5C2B8]" aria-hidden="true">
+                                ·
+                              </span>
+                            )}
                             {tx.accountWallet && (
-                              <div className="text-[10px] text-slate-400 dark:text-slate-500">
-                                {tx.accountWallet}
-                              </div>
+                              <span className="text-[#8C8980]">{tx.accountWallet}</span>
                             )}
                           </div>
                         ) : (
-                          <span className="text-slate-300 dark:text-slate-600">—</span>
+                          <span className="text-[#C5C2B8]">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 italic text-slate-400 dark:text-slate-500 text-[11px] max-w-xs truncate">
-                        {tx.description || (
-                          <span className="not-italic text-slate-300 dark:text-slate-600">—</span>
-                        )}
+
+                      <td className="px-4 py-3.5 text-[#78756E] text-xs max-w-xs truncate">
+                        {tx.description || <span className="text-[#C5C2B8]">—</span>}
                       </td>
+
                       <td
-                        className={`px-5 py-3 text-right font-bold text-xs ${style.textColor} whitespace-nowrap`}
+                        className={`px-5 py-3.5 text-right tabular-nums font-semibold text-sm ${style.amountColor} whitespace-nowrap`}
                       >
-                        {style.sign} {formatINR(tx.amount)}
+                        {style.sign}
+                        {formatINR(tx.amount)}
                       </td>
-                      <td className="px-4 py-3 text-center whitespace-nowrap">
+
+                      <td className="px-4 py-3.5 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                          {/* Modify Excel / Google Sheet Button */}
                           <button
                             type="button"
                             title="Modify Google Sheet record"
                             onClick={() => setEditingTransaction(tx)}
-                            className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 rounded-md transition-colors cursor-pointer"
+                            className="p-1.5 text-[#8C8980] hover:text-[#181816] dark:hover:text-white hover:bg-[#F4F3EF] dark:hover:bg-[#2A2A26] rounded-full transition-colors cursor-pointer"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
 
-                          {/* Delete from Sheet Button */}
                           {(onDeleteTransaction || onDeleteTransactionsBatch) && (
                             <button
                               type="button"
                               title="Delete transaction from Google Sheet"
                               onClick={() => handleTriggerSingleDelete(tx)}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60 rounded-md transition-colors cursor-pointer"
+                              className="p-1.5 text-[#8C8980] hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60 rounded-full transition-colors cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -722,22 +747,23 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
             </table>
           </div>
 
-          {/* Mobile Card View */}
-          <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800">
+          {/* Mobile List View styled after the Aurora "Transactions" screen */}
+          <div className="md:hidden divide-y divide-[#F2EFE9] dark:divide-[#22221F]">
             {filteredTransactions.map((tx) => {
               const style = getTypeStyle(tx.type);
-              const isSelected = tx.rowIndex !== undefined && selectedRowIndices.has(tx.rowIndex);
+              const isSelected =
+                tx.rowIndex !== undefined && selectedRowIndices.has(tx.rowIndex);
 
               return (
                 <div
                   key={tx.id || `${tx.date}-${tx.amount}-${tx.rowIndex}`}
-                  className={`p-3.5 flex items-center justify-between gap-3 transition-colors ${
+                  className={`px-4 py-3.5 flex items-center justify-between gap-3 transition-colors ${
                     isSelected
-                      ? 'bg-indigo-50/70 dark:bg-indigo-950/40'
-                      : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
+                      ? 'bg-[#F4F3EF] dark:bg-[#262622]'
+                      : 'hover:bg-[#FAF9F6] dark:hover:bg-[#1E1E1B]'
                   }`}
                 >
-                  {/* Mobile Checkbox */}
+                  {/* Checkbox */}
                   <div className="shrink-0">
                     <input
                       type="checkbox"
@@ -747,50 +773,49 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
                           handleToggleSelectRow(tx.rowIndex);
                         }
                       }}
-                      className="w-4 h-4 text-indigo-600 rounded border-slate-300 dark:border-slate-700 focus:ring-indigo-500 cursor-pointer"
+                      className="w-4 h-4 accent-[#181816] rounded border-[#D5D2CA] cursor-pointer"
                     />
                   </div>
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span
-                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border ${style.badgeBg}`}
-                      >
-                        {style.icon}
-                        {tx.type}
-                      </span>
-                      <span className="text-[11px] font-mono font-medium text-slate-500 dark:text-slate-400">
-                        {formatDateToDDMMYYYY(tx.date)}
-                        {tx.time ? ` • ${tx.time}` : ''}
-                      </span>
-                    </div>
-                    <div className="font-bold text-xs text-slate-800 dark:text-slate-200 truncate">
-                      {tx.category}
-                      {tx.subcategory ? ` / ${tx.subcategory}` : ''}
-                    </div>
-                    {(tx.paymentMode || tx.accountWallet) && (
-                      <div className="text-[10px] font-medium text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                        {[tx.paymentMode, tx.accountWallet].filter(Boolean).join(' • ')}
-                      </div>
-                    )}
-                    {tx.description && (
-                      <div className="text-[11px] italic text-slate-400 dark:text-slate-500 truncate mt-0.5">
-                        {tx.description}
-                      </div>
-                    )}
+                  {/* Stone Icon Badge */}
+                  <div
+                    className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${style.iconBg}`}
+                  >
+                    {style.icon}
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className={`font-bold text-xs sm:text-sm text-right ${style.textColor}`}>
-                      {style.sign} {formatINR(tx.amount)}
+                  {/* Transaction Details */}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-xs sm:text-sm text-[#181816] dark:text-[#F4F3EF] truncate">
+                      {tx.category}
+                      {tx.subcategory ? ` · ${tx.subcategory}` : ''}
+                    </div>
+                    <div className="text-[11px] text-[#8C8980] truncate mt-0.5">
+                      {tx.description ||
+                        [tx.paymentMode, tx.accountWallet].filter(Boolean).join(' · ') ||
+                        tx.type}
+                    </div>
+                    <div className="text-[10px] text-[#A3A096] tabular-nums mt-0.5">
+                      {formatDateToDDMMYYYY(tx.date)}
+                      {tx.time ? `, ${tx.time}` : ''}
+                    </div>
+                  </div>
+
+                  {/* Right Amount + Actions */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <div
+                      className={`tabular-nums font-semibold text-sm text-right ${style.amountColor}`}
+                    >
+                      {style.sign}
+                      {formatINR(tx.amount)}
                     </div>
 
-                    <div className="flex items-center gap-0.5">
+                    <div className="flex items-center">
                       <button
                         type="button"
                         onClick={() => setEditingTransaction(tx)}
                         title="Modify Record"
-                        className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-md"
+                        className="p-1.5 text-[#8C8980] hover:text-[#181816] dark:hover:text-white rounded-full"
                       >
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
@@ -800,7 +825,7 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
                           type="button"
                           onClick={() => handleTriggerSingleDelete(tx)}
                           title="Delete Record"
-                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md"
+                          className="p-1.5 text-[#8C8980] hover:text-rose-600 rounded-full"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

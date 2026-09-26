@@ -30,22 +30,22 @@ import {
 } from '../types';
 import { getCurrentMonthKey } from './formatters';
 
-// Refined, accessible color palette for expense categories
+// Earthy olive, warm bronze, mocha, and sage palette matching the Aurora neobank aesthetic
 const CATEGORY_COLORS = [
-  '#2563EB', // Blue
-  '#DC2626', // Red
-  '#059669', // Emerald
-  '#D97706', // Amber
-  '#7C3AED', // Purple
-  '#DB2777', // Pink
-  '#0891B2', // Cyan
-  '#EA580C', // Orange
-  '#4F46E5', // Indigo
-  '#65A30D', // Lime
-  '#9333EA', // Violet
-  '#0D9488', // Teal
-  '#BE123C', // Rose
-  '#475569', // Slate
+  '#4A5240', // Deep Olive
+  '#7A8270', // Muted Sage Olive
+  '#8C7355', // Warm Bronze / Umber
+  '#6E5648', // Deep Mocha
+  '#B8A38A', // Warm Sand
+  '#CFCBC2', // Soft Stone
+  '#363D2E', // Dark Forest Olive
+  '#9E8770', // Taupe
+  '#5C6453', // Moss
+  '#A39E93', // Warm Pewter
+  '#7D6B5D', // Earth Brown
+  '#8F9785', // Lichen
+  '#4F463E', // Espresso Stone
+  '#D8D4CA', // Alabaster Gray
 ];
 
 /**

@@ -3,14 +3,9 @@
  * File: src/components/Header.tsx
  * Application: inflotrack — Track Save Grow
  * Purpose:
- *   Sticky top navigation bar for both desktop and mobile views.
- *
- * Key Responsibilities:
- *   1. Displays the application brand identity ("inflotrack — Track Save Grow").
- *   2. Renders desktop view switcher tabs (Dashboard vs. Goals).
- *   3. Shows live lifetime net balance, quick Light/Dark theme toggle,
- *      4-digit Security PIN Lock/Unlock button, manual Google Sheets Sync
- *      trigger, Settings button, and authenticated user avatar.
+ *   Sticky top navigation bar styled in the warm stone & obsidian neobank
+ *   aesthetic using Poppins typography, soft stone pill tabs, and circular
+ *   utility buttons.
  * ============================================================================
  */
 
@@ -18,12 +13,11 @@ import React from 'react';
 import {
   RefreshCw,
   Settings,
-  LayoutDashboard,
-  Target,
   Lock,
   Unlock,
   Sun,
   Moon,
+  Download,
 } from 'lucide-react';
 import { SpreadsheetInfo, AppViewTab, ThemeMode } from '../types';
 import { formatINR } from '../utils/formatters';
@@ -33,8 +27,11 @@ interface HeaderProps {
   netBalance?: number;
   onRefresh: () => Promise<void>;
   isRefreshing: boolean;
+  onDownloadSheet?: () => Promise<void>;
+  isDownloadingSheet?: boolean;
   onOpenSettings: () => void;
   userEmail?: string | null;
+  userName?: string | null;
   userPhoto?: string | null;
   activeDesktopTab?: AppViewTab;
   onTabChange?: (tab: AppViewTab) => void;
@@ -45,12 +42,22 @@ interface HeaderProps {
   onThemeChange?: (theme: ThemeMode) => void;
 }
 
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning,';
+  if (hour < 18) return 'Good afternoon,';
+  return 'Good evening,';
+}
+
 export const Header: React.FC<HeaderProps> = ({
   netBalance,
   onRefresh,
   isRefreshing,
+  onDownloadSheet,
+  isDownloadingSheet = false,
   onOpenSettings,
   userEmail,
+  userName,
   userPhoto,
   activeDesktopTab = 'dashboard',
   onTabChange,
@@ -60,112 +67,93 @@ export const Header: React.FC<HeaderProps> = ({
   currentTheme,
   onThemeChange,
 }) => {
+  const displayUser =
+    userName || (userEmail ? userEmail.split('@')[0] : 'inflotrack');
+
   return (
-    <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 py-3.5 sticky top-0 z-30 shadow-xs transition-colors">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
-        {/* Left: Brand Identity */}
-        <div className="flex items-center gap-3">
-          <div className="bg-indigo-600 h-9 w-9 rounded-xl flex items-center justify-center shadow-xs shrink-0 text-white">
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2.5"
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-              />
-            </svg>
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg sm:text-xl font-black tracking-tight text-slate-900 dark:text-white">
-                inflotrack
-              </h1>
+    <header className="bg-[#F4F3EF]/95 dark:bg-[#121311]/95 backdrop-blur-md border-b border-[#E6E4DD] dark:border-[#262724] px-4 sm:px-6 h-18 sticky top-0 z-30 flex items-center transition-colors">
+      <div className="max-w-7xl w-full mx-auto flex items-center justify-between gap-4">
+        {/* Zone 1: Brand Emblem & Personal Greeting (Aurora style) */}
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="w-10 h-10 rounded-2xl bg-white dark:bg-[#1C1D1B] border border-[#E6E4DD] dark:border-[#2C2D2A] shadow-2xs flex items-center justify-center shrink-0">
+            <div className="flex items-center -space-x-1.5">
+              <span className="w-3.5 h-3.5 rounded-full bg-[#181816] dark:bg-[#F4F3EF]" />
+              <span className="w-3.5 h-3.5 rounded-full bg-[#4A5240] dark:bg-[#8C7355] opacity-90" />
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[160px] sm:max-w-xs font-semibold tracking-wide">
-              Track Save Grow
+          </div>
+          <div className="leading-tight">
+            <p className="text-[11px] font-normal text-[#8A8880] dark:text-[#9E9C94]">
+              {getGreeting()}
             </p>
+            <div className="flex items-center gap-2">
+              <span className="text-sm sm:text-base font-semibold tracking-tight text-[#181816] dark:text-white capitalize truncate max-w-[160px] sm:max-w-[220px]">
+                {displayUser}
+              </span>
+              <span className="hidden sm:inline text-xs font-medium text-[#8A8880] dark:text-[#7A7870]">
+                · inflotrack
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Center: Desktop Navigation Tabs (Dashboard & Goals) */}
+        {/* Zone 2: Soft Stone Segmented Pill Navigation */}
         {onTabChange && (
-          <nav className="hidden md:flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+          <nav className="hidden md:flex items-center bg-[#EAE8E1] dark:bg-[#1C1D1B] p-1 rounded-full border border-[#E2DFD7] dark:border-[#2A2B28]">
             <button
               type="button"
               id="desktop-tab-dashboard"
               onClick={() => onTabChange('dashboard')}
-              className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`px-5 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
                 activeDesktopTab === 'dashboard'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                  ? 'bg-white dark:bg-[#2C2D2A] text-[#181816] dark:text-white shadow-2xs'
+                  : 'text-[#6E6D68] dark:text-[#9E9C94] hover:text-[#181816] dark:hover:text-white'
               }`}
             >
-              <LayoutDashboard className="w-4 h-4" />
-              Dashboard
+              Overview
             </button>
             <button
               type="button"
               id="desktop-tab-goals"
               onClick={() => onTabChange('goals')}
-              className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`px-5 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer whitespace-nowrap ${
                 activeDesktopTab === 'goals'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                  ? 'bg-white dark:bg-[#2C2D2A] text-[#181816] dark:text-white shadow-2xs'
+                  : 'text-[#6E6D68] dark:text-[#9E9C94] hover:text-[#181816] dark:hover:text-white'
               }`}
             >
-              <Target className="w-4 h-4" />
-              Goals
+              Goals & Reserves
             </button>
           </nav>
         )}
 
-        {/* Right: Balance & Action Controls */}
-        <div className="flex items-center gap-2 sm:gap-2.5">
+        {/* Zone 3: Live Balance & Circular Stone Controls */}
+        <div className="flex items-center gap-2">
           {typeof netBalance === 'number' && (
-            <div className="hidden lg:flex flex-col items-end pr-3 border-r border-slate-200 dark:border-slate-800">
-              <span className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500 font-bold">
-                Live Balance
-              </span>
-              <span className={`text-base font-extrabold ${netBalance >= 0 ? 'text-slate-900 dark:text-white' : 'text-rose-600 dark:text-rose-400'}`}>
+            <div className="hidden lg:flex items-center gap-2 pr-3 mr-1 border-r border-[#E2DFD7] dark:border-[#262724]">
+              <span className="text-xs text-[#8A8880] dark:text-[#9E9C94]">Total balance</span>
+              <span
+                className={`tabular-nums text-sm font-semibold ${
+                  netBalance >= 0
+                    ? 'text-[#181816] dark:text-white'
+                    : 'text-rose-600 dark:text-rose-400'
+                }`}
+              >
                 {formatINR(netBalance)}
               </span>
             </div>
           )}
 
-          {/* Quick Theme Switcher Button with centered Sun/Moon */}
-          {onThemeChange && currentTheme && (
-            <button
-              type="button"
-              id="btn-header-theme-toggle"
-              onClick={() => onThemeChange(currentTheme === 'dark' ? 'light' : 'dark')}
-              title={`Switch to ${currentTheme === 'dark' ? 'Light' : 'Dark'} Mode`}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-300 hover:text-amber-500 dark:hover:text-amber-400 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer border border-transparent hover:border-slate-300 dark:hover:border-slate-700"
-            >
-              {currentTheme === 'dark' ? (
-                <Sun className="w-4 h-4 text-amber-400 shrink-0" />
-              ) : (
-                <Moon className="w-4 h-4 text-indigo-600 shrink-0" />
-              )}
-            </button>
-          )}
-
-          {/* Security Lock / Unlock Button with clear icon symbol */}
+          {/* Security Lock / Unlock Pill */}
           {isUnlocked ? (
             <button
               type="button"
               id="btn-header-lock-toggle"
               onClick={onLock}
               title="Lock protected balances and targets"
-              className="px-2.5 py-1.5 sm:px-3 sm:py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800 rounded-lg flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              className="h-9 px-3.5 text-xs font-medium text-[#181816] dark:text-[#F4F3EF] bg-[#EAE8E1] dark:bg-[#1C1D1B] hover:bg-[#DFDDD4] dark:hover:bg-[#282926] rounded-full flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
             >
-              <Unlock className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span className="hidden sm:inline">Lock</span>
+              <Unlock className="w-3.5 h-3.5 text-[#2E7D32] dark:text-emerald-400 shrink-0" />
+              <span className="hidden sm:inline">Unlocked</span>
             </button>
           ) : (
             <button
@@ -173,10 +161,10 @@ export const Header: React.FC<HeaderProps> = ({
               id="btn-header-unlock-toggle"
               onClick={onOpenUnlockModal}
               title="Unlock protected balances and targets with 4-digit PIN"
-              className="px-2.5 py-1.5 sm:px-3 sm:py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 rounded-lg flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              className="h-9 px-3.5 text-xs font-medium text-[#181816] dark:text-[#F4F3EF] bg-[#EAE8E1] dark:bg-[#1C1D1B] hover:bg-[#DFDDD4] dark:hover:bg-[#282926] rounded-full flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
             >
-              <Lock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-              <span className="hidden sm:inline">Unlock</span>
+              <Lock className="w-3.5 h-3.5 text-[#8C7355] dark:text-amber-400 shrink-0" />
+              <span className="hidden sm:inline">Locked</span>
             </button>
           )}
 
@@ -187,13 +175,51 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={onRefresh}
             disabled={isRefreshing}
             title="Sync with Google Sheets"
-            className="px-2.5 py-1.5 sm:px-3 sm:py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-400 bg-slate-50 dark:bg-slate-800/80 hover:bg-indigo-50/60 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+            className="h-9 px-3.5 text-xs font-medium text-[#181816] dark:text-[#F4F3EF] bg-[#EAE8E1] dark:bg-[#1C1D1B] hover:bg-[#DFDDD4] dark:hover:bg-[#282926] rounded-full flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
           >
             <RefreshCw
-              className={`w-3.5 h-3.5 shrink-0 ${isRefreshing ? 'animate-spin text-indigo-600' : 'text-slate-500 dark:text-slate-400'}`}
+              className={`w-3.5 h-3.5 shrink-0 ${
+                isRefreshing
+                  ? 'animate-spin text-[#4A5240] dark:text-emerald-400'
+                  : 'text-[#6E6D68] dark:text-[#9E9C94]'
+              }`}
             />
-            <span className="hidden sm:inline">{isRefreshing ? 'Syncing...' : 'Sync'}</span>
+            <span className="hidden sm:inline">{isRefreshing ? 'Syncing' : 'Sync'}</span>
           </button>
+
+          {/* Store in Drive & Download Sheet Button */}
+          {onDownloadSheet && (
+            <button
+              type="button"
+              id="btn-header-download-sheet"
+              onClick={() => void onDownloadSheet()}
+              disabled={isDownloadingSheet}
+              title="Store in Google Drive folder and download inflotrack sheet"
+              className="h-9 px-4 text-xs font-medium text-white dark:text-[#181816] bg-[#181816] hover:bg-[#2C2D2A] dark:bg-[#F4F3EF] dark:hover:bg-[#E6E4DD] rounded-full flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+            >
+              <Download className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline">
+                {isDownloadingSheet ? 'Exporting...' : 'Download Sheet'}
+              </span>
+            </button>
+          )}
+
+          {/* Theme Switcher */}
+          {onThemeChange && currentTheme && (
+            <button
+              type="button"
+              id="btn-header-theme-toggle"
+              onClick={() => onThemeChange(currentTheme === 'dark' ? 'light' : 'dark')}
+              title={`Switch to ${currentTheme === 'dark' ? 'Light' : 'Dark'} Mode`}
+              className="w-9 h-9 rounded-full flex items-center justify-center text-[#181816] dark:text-[#F4F3EF] bg-[#EAE8E1] dark:bg-[#1C1D1B] hover:bg-[#DFDDD4] dark:hover:bg-[#282926] transition-colors cursor-pointer"
+            >
+              {currentTheme === 'dark' ? (
+                <Sun className="w-4 h-4 text-amber-400 shrink-0" />
+              ) : (
+                <Moon className="w-4 h-4 text-[#181816] shrink-0" />
+              )}
+            </button>
+          )}
 
           {/* Settings Trigger */}
           <button
@@ -201,9 +227,9 @@ export const Header: React.FC<HeaderProps> = ({
             id="btn-header-settings"
             onClick={onOpenSettings}
             title="Open Settings"
-            className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
+            className="w-9 h-9 rounded-full flex items-center justify-center text-[#181816] dark:text-[#F4F3EF] bg-[#EAE8E1] dark:bg-[#1C1D1B] hover:bg-[#DFDDD4] dark:hover:bg-[#282926] transition-colors cursor-pointer"
           >
-            <Settings className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+            <Settings className="w-4 h-4" />
           </button>
 
           {/* User Avatar */}
@@ -211,11 +237,11 @@ export const Header: React.FC<HeaderProps> = ({
             <img
               src={userPhoto}
               alt="Profile"
-              className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-700 shrink-0 object-cover"
+              className="w-9 h-9 rounded-full border border-[#E2DFD7] dark:border-[#2C2D2A] shrink-0 object-cover"
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="w-8 h-8 rounded-full bg-slate-800 dark:bg-slate-700 text-white flex items-center justify-center text-xs font-bold shrink-0">
+            <div className="w-9 h-9 rounded-full bg-[#181816] dark:bg-[#2C2D2A] text-white flex items-center justify-center text-xs font-semibold shrink-0">
               {userEmail ? userEmail[0].toUpperCase() : 'U'}
             </div>
           )}

@@ -5,25 +5,13 @@
  * Purpose:
  *   Frontend client service for all Google Sheets (primary finance database:
  *   `inflowtrack`) and Google Drive (`inflowtrack` folder:
- *   `1vzWhp8o3I_3jbtGvS0NUS2Xo-VdOBYKb`) synchronization operations.
- *
- * Key Responsibilities:
- *   1. Attaches the user's verified Firebase ID Token (`Authorization: Bearer`)
- *      to every request sent to `/api/finance/*`, `/api/security/*`, and
- *      `/api/drive/*`.
- *   2. Reads and writes Transactions (Income, Expense, Transfer, Savings,
- *      Emergency Fund, Lent, Borrowed), Categories, Payment Modes, Budgets,
- *      and Recurring Transaction Templates in the `inflowtrack` Google Sheet.
- *   3. Manages private Google Drive JSON snapshot backups and receipts inside
- *      the `inflowtrack` Drive folder (`1vzWhp8o3I_3jbtGvS0NUS2Xo-VdOBYKb`).
- *   4. Translates network and server errors into clear, user-friendly messages
- *      without leaking tokens or credentials.
+ *   `https://drive.google.com/drive/folders/1WTHHDzwzO79ypcP06ZmDkBuDADosnH30`)
+ *   synchronization, sheet creation, and sheet download operations.
  * ============================================================================
  */
 
 import {
   Transaction,
-  TransactionType,
   CategoryData,
   SpreadsheetInfo,
   RecurringTemplate,
@@ -37,8 +25,8 @@ import { getFreshAuthToken } from './firebase';
 
 export const TARGET_SPREADSHEET_NAME = 'inflowtrack';
 export const TARGET_DRIVE_FOLDER_NAME = 'inflowtrack';
-export const TARGET_DRIVE_FOLDER_ID = '1vzWhp8o3I_3jbtGvS0NUS2Xo-VdOBYKb';
-export const TARGET_DRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/1vzWhp8o3I_3jbtGvS0NUS2Xo-VdOBYKb';
+export const TARGET_DRIVE_FOLDER_ID = '1WTHHDzwzO79ypcP06ZmDkBuDADosnH30';
+export const TARGET_DRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/1WTHHDzwzO79ypcP06ZmDkBuDADosnH30';
 
 // Default Starter Categories
 export const DEFAULT_INCOME_CATEGORIES = [
@@ -160,6 +148,23 @@ export function getMonthSheetName(rawDate?: string): string {
   return `${MONTH_NAMES[now.getMonth()]}_${now.getFullYear()}`;
 }
 
+export function extractFolderIdFromUrlOrId(rawInput: string): string {
+  const trimmed = String(rawInput || '').trim();
+  if (!trimmed) return TARGET_DRIVE_FOLDER_ID;
+  const folderMatch = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (folderMatch && folderMatch[1]) {
+    return folderMatch[1];
+  }
+  const idParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idParamMatch && idParamMatch[1]) {
+    return idParamMatch[1];
+  }
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) {
+    return trimmed;
+  }
+  return TARGET_DRIVE_FOLDER_ID;
+}
+
 /**
  * Formats API and network errors into clear, user-friendly messages without exposing sensitive tokens or stack traces.
  */
@@ -186,6 +191,20 @@ async function resolveToken(passedToken?: string | null): Promise<string> {
   return token;
 }
 
+async function buildAuthHeaders(
+  passedToken?: string | null,
+  includeJsonContentType = false
+): Promise<Record<string, string>> {
+  const token = await resolveToken(passedToken);
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+  };
+  if (includeJsonContentType) {
+    headers['Content-Type'] = 'application/json';
+  }
+  return headers;
+}
+
 // Short-lived in-memory bootstrap cache to avoid duplicate round-trips during loadData()
 let lastBootstrapCache: {
   timestamp: number;
@@ -194,6 +213,10 @@ let lastBootstrapCache: {
   transactions: Transaction[];
   recurringTemplates: RecurringTemplate[];
 } | null = null;
+
+export function clearBootstrapCache(): void {
+  lastBootstrapCache = null;
+}
 
 export async function fetchFinanceBootstrap(
   accessToken: string,
@@ -209,12 +232,8 @@ export async function fetchFinanceBootstrap(
   }
 
   try {
-    const token = await resolveToken(accessToken);
-    const res = await fetch('/api/finance/bootstrap', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    const headers = await buildAuthHeaders(accessToken, false);
+    const res = await fetch('/api/finance/bootstrap', { headers });
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -267,19 +286,132 @@ export async function readTransactions(accessToken: string, _spreadsheetId?: str
   return data.transactions;
 }
 
+/**
+ * Updates the Google Drive folder location where the `inflowtrack` sheet and backups are stored,
+ * and optionally creates a new `inflowtrack` sheet inside that folder.
+ */
+export async function updateDriveFolderLocation(
+  accessToken: string | null | undefined,
+  options: {
+    driveFolderUrl: string;
+    spreadsheetName?: string;
+    createNewSheet?: boolean;
+  }
+): Promise<{ sheetInfo: SpreadsheetInfo; message: string }> {
+  try {
+    const headers = await buildAuthHeaders(accessToken, true);
+    const res = await fetch('/api/finance/drive-location', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(options),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to update Google Drive location.');
+    }
+    lastBootstrapCache = null;
+    return {
+      sheetInfo: data.sheetInfo as SpreadsheetInfo,
+      message: data.message || 'Google Drive location updated and synced.',
+    };
+  } catch (error) {
+    throw formatUserFriendlyError(error, 'Failed to update Google Drive location.');
+  }
+}
+
+/**
+ * Creates a brand-new `inflowtrack` Google Sheet inside the configured Google Drive folder
+ * (`https://drive.google.com/drive/folders/1WTHHDzwzO79ypcP06ZmDkBuDADosnH30`) and syncs all
+ * user transactions, categories, and budgets into it.
+ */
+export async function createNewInflowtrackSheetInDrive(
+  accessToken?: string | null,
+  options?: {
+    driveFolderUrl?: string;
+    spreadsheetName?: string;
+  }
+): Promise<{ sheetInfo: SpreadsheetInfo; message: string }> {
+  try {
+    const headers = await buildAuthHeaders(accessToken, true);
+    const res = await fetch('/api/finance/sheet/create', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        driveFolderUrl: options?.driveFolderUrl || TARGET_DRIVE_FOLDER_URL,
+        spreadsheetName: options?.spreadsheetName || TARGET_SPREADSHEET_NAME,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to create new inflowtrack sheet in Google Drive.');
+    }
+    lastBootstrapCache = null;
+    return {
+      sheetInfo: data.sheetInfo as SpreadsheetInfo,
+      message: data.message || 'Created new inflowtrack sheet in your Google Drive folder.',
+    };
+  } catch (error) {
+    throw formatUserFriendlyError(error, 'Failed to create new inflowtrack sheet in Google Drive.');
+  }
+}
+
+/**
+ * Stores/syncs the latest `inflowtrack` spreadsheet in the user's Google Drive folder
+ * (`https://drive.google.com/drive/folders/1WTHHDzwzO79ypcP06ZmDkBuDADosnH30`) and downloads
+ * the `inflowtrack` spreadsheet file (.xlsx or .csv) directly to the user's device.
+ */
+export async function downloadSheetFromDrive(
+  accessToken?: string | null,
+  options?: { driveFolderUrl?: string; spreadsheetName?: string }
+): Promise<{ fileName: string; syncedToDrive: boolean }> {
+  try {
+    const headers = await buildAuthHeaders(accessToken, true);
+    const res = await fetch('/api/finance/sheet/download', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        driveFolderUrl: options?.driveFolderUrl || TARGET_DRIVE_FOLDER_URL,
+        spreadsheetName: options?.spreadsheetName || TARGET_SPREADSHEET_NAME,
+      }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Failed to download inflowtrack sheet.');
+    }
+
+    const contentDisposition = res.headers.get('Content-Disposition') || '';
+    const syncedHeader = res.headers.get('X-Drive-Synced') === 'true';
+    const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+    const fileName = filenameMatch?.[1] || `${TARGET_SPREADSHEET_NAME}.xlsx`;
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    lastBootstrapCache = null;
+    return { fileName, syncedToDrive: syncedHeader };
+  } catch (error) {
+    throw formatUserFriendlyError(error, 'Failed to store and download inflowtrack sheet.');
+  }
+}
+
 export async function appendTransaction(
   accessToken: string,
   _spreadsheetId: string,
   transaction: Omit<Transaction, 'id' | 'rowIndex'>
 ): Promise<void> {
   try {
-    const token = await resolveToken(accessToken);
+    const headers = await buildAuthHeaders(accessToken, true);
     const res = await fetch('/api/finance/transactions', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(transaction),
     });
 
@@ -301,13 +433,10 @@ export async function updateTransactionRow(
   _currentSheetName?: string
 ): Promise<void> {
   try {
-    const token = await resolveToken(accessToken);
+    const headers = await buildAuthHeaders(accessToken, true);
     const res = await fetch(`/api/finance/transactions/${rowIndex}`, {
       method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(transaction),
     });
 
@@ -338,13 +467,10 @@ export async function deleteTransactionsBatch(
 ): Promise<void> {
   if (!targets || targets.length === 0) return;
   try {
-    const token = await resolveToken(accessToken);
+    const headers = await buildAuthHeaders(accessToken, true);
     const res = await fetch('/api/finance/transactions/delete', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({ targets }),
     });
 
@@ -365,13 +491,10 @@ export async function addCategoryToSheet(
   categoryName: string
 ): Promise<void> {
   try {
-    const token = await resolveToken(accessToken);
+    const headers = await buildAuthHeaders(accessToken, true);
     const res = await fetch('/api/finance/categories', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({ type, categoryName }),
     });
 
@@ -391,13 +514,10 @@ export async function addPaymentModeToSheet(
   modeName: string
 ): Promise<void> {
   try {
-    const token = await resolveToken(accessToken);
+    const headers = await buildAuthHeaders(accessToken, true);
     const res = await fetch('/api/finance/categories', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({ paymentMode: modeName }),
     });
     if (!res.ok) {
@@ -414,13 +534,10 @@ export async function updateBudgetsInSheet(
   budgets: Partial<BudgetConfig>
 ): Promise<BudgetConfig> {
   try {
-    const token = await resolveToken(accessToken);
+    const headers = await buildAuthHeaders(accessToken, true);
     const res = await fetch('/api/finance/budgets', {
       method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(budgets),
     });
 
@@ -437,10 +554,8 @@ export async function updateBudgetsInSheet(
 
 export async function fetchRecurringTemplatesFromSheet(accessToken?: string | null): Promise<RecurringTemplate[]> {
   try {
-    const token = await resolveToken(accessToken);
-    const res = await fetch('/api/finance/recurring', {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const headers = await buildAuthHeaders(accessToken, false);
+    const res = await fetch('/api/finance/recurring', { headers });
     if (!res.ok) return [];
     const data = await res.json();
     return data.recurringTemplates || [];
@@ -454,13 +569,10 @@ export async function createRecurringTemplateInSheet(
   template: Omit<RecurringTemplate, 'id'>
 ): Promise<RecurringTemplate[]> {
   try {
-    const token = await resolveToken(accessToken);
+    const headers = await buildAuthHeaders(accessToken, true);
     const res = await fetch('/api/finance/recurring', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(template),
     });
     const data = await res.json().catch(() => ({}));
@@ -479,10 +591,10 @@ export async function deleteRecurringTemplateFromSheet(
   id: string
 ): Promise<RecurringTemplate[]> {
   try {
-    const token = await resolveToken(accessToken);
+    const headers = await buildAuthHeaders(accessToken, false);
     const res = await fetch(`/api/finance/recurring/${encodeURIComponent(id)}`, {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -515,10 +627,8 @@ export async function updateSecurityPinInSheet(
 
 export async function listDriveBackups(accessToken?: string | null): Promise<DriveBackupItem[]> {
   try {
-    const token = await resolveToken(accessToken);
-    const res = await fetch('/api/drive/backups', {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const headers = await buildAuthHeaders(accessToken, false);
+    const res = await fetch('/api/drive/backups', { headers });
     if (!res.ok) return [];
     const data = await res.json();
     return data.backups || [];
@@ -532,13 +642,10 @@ export async function createDriveBackup(
   options?: { kind?: 'backup' | 'receipt'; customNote?: string; receiptName?: string; receiptData?: string }
 ): Promise<DriveBackupItem> {
   try {
-    const token = await resolveToken(accessToken);
+    const headers = await buildAuthHeaders(accessToken, true);
     const res = await fetch('/api/drive/backup', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(options || { kind: 'backup' }),
     });
     const data = await res.json().catch(() => ({}));
@@ -557,9 +664,9 @@ export async function downloadDriveBackupFile(
   fileName: string
 ): Promise<void> {
   try {
-    const token = await resolveToken(accessToken);
+    const headers = await buildAuthHeaders(accessToken, false);
     const res = await fetch(`/api/drive/backups/${encodeURIComponent(backupId)}/download`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));

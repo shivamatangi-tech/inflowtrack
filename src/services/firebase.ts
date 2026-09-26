@@ -3,19 +3,20 @@
  * File: src/services/firebase.ts
  * Application: inflotrack — Track Save Grow
  * Purpose:
- *   Firebase Authentication service (Authentication & Session Security ONLY).
- *   Connects to Firebase project `inflowtrack-06` via `firebase-applet-config.json`.
+ *   Firebase Authentication service for Email & Password login, registration,
+ *   session persistence, and password recovery.
+ *   Connects to the user's Firebase project (`inflowtrack-06`) defined in
+ *   `firebase-applet-config.json` and maintains a fallback path via the
+ *   backend `/api/auth/*` endpoints if Firebase Email/Password auth is
+ *   temporarily unavailable.
  *
  * Key Responsibilities:
  *   1. Email + Password Registration (`registerWithEmailPassword`), Sign-In
  *      (`loginWithEmailPassword`), and Sign-Out (`logout`).
- *   2. Password Reset Email (`sendPasswordReset`) and Authenticated Password
- *      Change (`changeAccountPassword`).
- *   3. Session Persistence (`browserLocalPersistence` when "Remember me" is
- *      checked, or `browserSessionPersistence` otherwise) and automatic ID
- *      token refresh (`getFreshAuthToken`).
- *   4. Does NOT use Cloud Firestore or Direct GSI OAuth. All financial data
- *      is stored in Google Sheets via backend-verified UID tokens.
+ *   2. Password Reset (`requestPasswordReset`) and Password Change
+ *      (`changeUserPassword`) with re-authentication.
+ *   3. Automatic ID Token refresh (`getFreshAuthToken`) for authenticating
+ *      every `/api/finance/*` and `/api/drive/*` backend call.
  * ============================================================================
  */
 
@@ -40,28 +41,13 @@ import firebaseConfig from '../../firebase-applet-config.json';
 import { GoogleUser } from '../types';
 import { scrubLegacyPlaintextSecurityStorage } from '../utils/security';
 
-// Initialize Firebase App strictly for Authentication (NO Firestore)
+// Initialize Firebase App (inflowtrack-06)
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
-const SESSION_TOKEN_KEY = 'financeflow_auth_session_token';
-const SESSION_USER_KEY = 'financeflow_auth_session_user';
-const REMEMBER_ME_KEY = 'financeflow_remember_session';
-
+// In-memory token and user cache
 let cachedToken: string | null = null;
 let cachedUser: GoogleUser | null = null;
-
-function getStorage(): Storage {
-  try {
-    const remember = localStorage.getItem(REMEMBER_ME_KEY);
-    if (remember === 'false') {
-      return sessionStorage;
-    }
-    return localStorage;
-  } catch {
-    return localStorage;
-  }
-}
 
 /**
  * Maps technical Firebase Auth errors into clear, user-friendly messages.
@@ -91,140 +77,91 @@ export function formatAuthErrorMessage(err: unknown, fallbackMessage: string): s
     return 'An account with this email already exists. Please sign in instead.';
   }
   if (code === 'auth/weak-password' || msg.includes('weak-password')) {
-    return 'Password is too weak. Please choose a password with at least 6 characters.';
+    return 'Password is too weak. Please use at least 6 characters.';
   }
   if (code === 'auth/too-many-requests' || msg.includes('too-many-requests')) {
-    return 'Too many failed attempts. Please wait a few minutes or reset your password.';
+    return 'Too many unsuccessful attempts. Please wait a moment before trying again.';
   }
-  if (code === 'auth/user-token-expired' || code === 'auth/requires-recent-login') {
-    return 'Your session has expired. Please sign in again to continue.';
+  if (code === 'auth/network-request-failed' || msg.includes('network-request-failed')) {
+    return 'Network error while connecting to authentication service. Please check your internet connection.';
   }
-  if (code === 'auth/network-request-failed' || msg.toLowerCase().includes('network') || msg.toLowerCase().includes('fetch')) {
-    return 'Network unavailable. Please check your internet connection and try again.';
+  if (code === 'auth/requires-recent-login') {
+    return 'For security, please sign out and sign in again before changing your password.';
   }
 
-  // Strip any technical "Firebase: Error (auth/...)" wrapper if present
-  if (msg.startsWith('Firebase:')) {
-    return fallbackMessage;
+  if (!msg.includes('Firebase:') && !msg.includes('auth/')) {
+    return msg;
   }
-  return msg || fallbackMessage;
+  return fallbackMessage;
 }
 
 function mapFirebaseUser(fbUser: FirebaseUser): GoogleUser {
+  const emailName = fbUser.email ? fbUser.email.split('@')[0] : 'Finance User';
   return {
     uid: fbUser.uid,
-    email: fbUser.email || null,
-    displayName: fbUser.displayName || (fbUser.email ? fbUser.email.split('@')[0] : 'FinanceFlow User'),
-    photoURL: fbUser.photoURL || null,
+    email: fbUser.email,
+    displayName: fbUser.displayName || emailName,
+    photoURL: fbUser.photoURL,
     authProvider: 'firebase',
   };
 }
 
-function persistSession(user: GoogleUser, token: string, rememberMe = true): void {
-  cachedUser = user;
-  cachedToken = token;
-  try {
-    localStorage.setItem(REMEMBER_ME_KEY, rememberMe ? 'true' : 'false');
-    const targetStorage = rememberMe ? localStorage : sessionStorage;
-    const otherStorage = rememberMe ? sessionStorage : localStorage;
-    otherStorage.removeItem(SESSION_TOKEN_KEY);
-    otherStorage.removeItem(SESSION_USER_KEY);
-    targetStorage.setItem(SESSION_TOKEN_KEY, token);
-    targetStorage.setItem(SESSION_USER_KEY, JSON.stringify(user));
-  } catch {
-    // Ignore storage quota errors
-  }
-}
-
-function clearPersistedSession(): void {
-  cachedUser = null;
-  cachedToken = null;
-  try {
-    localStorage.removeItem(SESSION_TOKEN_KEY);
-    localStorage.removeItem(SESSION_USER_KEY);
-    sessionStorage.removeItem(SESSION_TOKEN_KEY);
-    sessionStorage.removeItem(SESSION_USER_KEY);
-    // Also remove any legacy GSI keys
-    localStorage.removeItem('financeflow_google_access_token');
-    localStorage.removeItem('financeflow_google_user');
-    localStorage.removeItem('financeflow_token_expiry');
-  } catch {
-    // Ignore
-  }
-}
-
 /**
- * Initializes authentication state and listens for Firebase Auth session changes.
+ * Fallback server-side personal account registration if Firebase Email/Password provider
+ * is disabled in the Firebase console (`auth/operation-not-allowed` or `auth/configuration-not-found`).
  */
-export const initAuth = (
-  onAuthSuccess?: (user: GoogleUser, token: string) => void,
-  onAuthFailure?: () => void
-): (() => void) => {
-  // Always scrub any legacy plaintext PINs or OAuth tokens on boot
-  scrubLegacyPlaintextSecurityStorage();
-
-  let unsubscribed = false;
-
-  const unsubscribeFirebase = onAuthStateChanged(auth, async (fbUser) => {
-    if (unsubscribed) return;
-
-    if (fbUser) {
-      try {
-        const idToken = await fbUser.getIdToken();
-        const mapped = mapFirebaseUser(fbUser);
-        const remember = localStorage.getItem(REMEMBER_ME_KEY) !== 'false';
-        persistSession(mapped, idToken, remember);
-        if (onAuthSuccess) onAuthSuccess(mapped, idToken);
-        return;
-      } catch {
-        // Fall through to check server session
-      }
-    }
-
-    // Check if there is an active server-verified personal session
-    try {
-      const storage = getStorage();
-      const savedToken = storage.getItem(SESSION_TOKEN_KEY) || localStorage.getItem(SESSION_TOKEN_KEY);
-      const savedUserRaw = storage.getItem(SESSION_USER_KEY) || localStorage.getItem(SESSION_USER_KEY);
-
-      if (savedToken && savedUserRaw) {
-        const res = await fetch('/api/auth/me', {
-          headers: { Authorization: `Bearer ${savedToken}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const verifiedUser: GoogleUser = data.user || JSON.parse(savedUserRaw);
-          cachedToken = savedToken;
-          cachedUser = verifiedUser;
-          if (onAuthSuccess) onAuthSuccess(verifiedUser, savedToken);
-          return;
-        }
-      }
-    } catch {
-      // Session invalid or network offline
-    }
-
-    clearPersistedSession();
-    if (onAuthFailure) onAuthFailure();
+async function fallbackServerRegister(
+  email: string,
+  password: string,
+  displayName?: string
+): Promise<{ user: GoogleUser; token: string }> {
+  const res = await fetch('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, displayName }),
   });
-
-  return () => {
-    unsubscribed = true;
-    unsubscribeFirebase();
-  };
-};
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Registration failed. Please check your details and try again.');
+  }
+  cachedToken = data.token;
+  cachedUser = data.user;
+  return { user: data.user, token: data.token };
+}
 
 /**
- * Registers a new user with Email + Password using Firebase Authentication.
+ * Fallback server-side personal account login if Firebase Email/Password provider
+ * is disabled in the Firebase console.
+ */
+async function fallbackServerLogin(
+  email: string,
+  password: string
+): Promise<{ user: GoogleUser; token: string }> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Incorrect email or password. Please try again.');
+  }
+  cachedToken = data.token;
+  cachedUser = data.user;
+  return { user: data.user, token: data.token };
+}
+
+/**
+ * Register a new user with Email & Password using Firebase Authentication (`inflowtrack-06`).
  */
 export async function registerWithEmailPassword(
   email: string,
   password: string,
   displayName?: string,
   rememberMe = true
-): Promise<{ user: GoogleUser; accessToken: string }> {
-  const cleanEmail = email.trim();
-  if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+): Promise<{ user: GoogleUser; token: string }> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail || !normalizedEmail.includes('@')) {
     throw new Error('Please enter a valid email address.');
   }
   if (!password || password.length < 6) {
@@ -233,55 +170,44 @@ export async function registerWithEmailPassword(
 
   try {
     await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
-    const credential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+    const credential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+
     if (displayName && displayName.trim()) {
       await updateProfile(credential.user, { displayName: displayName.trim() });
     }
-    const idToken = await credential.user.getIdToken();
-    const user: GoogleUser = {
-      uid: credential.user.uid,
-      email: credential.user.email || cleanEmail,
-      displayName: displayName?.trim() || credential.user.displayName || cleanEmail.split('@')[0],
-      photoURL: null,
-      authProvider: 'firebase',
-    };
-    persistSession(user, idToken, rememberMe);
-    return { user, accessToken: idToken };
-  } catch (fbErr: any) {
-    const code = fbErr?.code || '';
-    // If Firebase Console Email/Password provider is not yet toggled on, use server-side PBKDF2 personal auth
+
+    const idToken = await credential.user.getIdToken(true);
+    const mappedUser = mapFirebaseUser(credential.user);
+    if (displayName && displayName.trim()) {
+      mappedUser.displayName = displayName.trim();
+    }
+
+    cachedToken = idToken;
+    cachedUser = mappedUser;
+    return { user: mappedUser, token: idToken };
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code || '';
     if (
       code === 'auth/operation-not-allowed' ||
       code === 'auth/configuration-not-found' ||
       code === 'auth/admin-restricted-operation'
     ) {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, password, displayName }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.error || 'Registration failed. Please try again.');
-      }
-      persistSession(data.user, data.token, rememberMe);
-      return { user: data.user, accessToken: data.token };
+      return fallbackServerRegister(normalizedEmail, password, displayName);
     }
-
-    throw new Error(formatAuthErrorMessage(fbErr, 'Unable to create account. Please try again.'));
+    throw new Error(formatAuthErrorMessage(err, 'Unable to create your account. Please try again.'));
   }
 }
 
 /**
- * Signs in an existing user with Email + Password using Firebase Authentication.
+ * Sign in an existing user with Email & Password using Firebase Authentication (`inflowtrack-06`).
  */
 export async function loginWithEmailPassword(
   email: string,
   password: string,
   rememberMe = true
-): Promise<{ user: GoogleUser; accessToken: string }> {
-  const cleanEmail = email.trim();
-  if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+): Promise<{ user: GoogleUser; token: string }> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail || !normalizedEmail.includes('@')) {
     throw new Error('Please enter a valid email address.');
   }
   if (!password) {
@@ -290,77 +216,54 @@ export async function loginWithEmailPassword(
 
   try {
     await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
-    const credential = await signInWithEmailAndPassword(auth, cleanEmail, password);
+    const credential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
     const idToken = await credential.user.getIdToken();
-    const user = mapFirebaseUser(credential.user);
-    persistSession(user, idToken, rememberMe);
-    return { user, accessToken: idToken };
-  } catch (fbErr: any) {
-    const code = fbErr?.code || '';
+    const mappedUser = mapFirebaseUser(credential.user);
+
+    cachedToken = idToken;
+    cachedUser = mappedUser;
+    return { user: mappedUser, token: idToken };
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code || '';
     if (
       code === 'auth/operation-not-allowed' ||
       code === 'auth/configuration-not-found' ||
-      code === 'auth/user-not-found' ||
-      code === 'auth/invalid-credential'
+      code === 'auth/admin-restricted-operation'
     ) {
-      // Check server-side personal auth store if account was created before Firebase Console toggle
-      try {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: cleanEmail, password }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          persistSession(data.user, data.token, rememberMe);
-          return { user: data.user, accessToken: data.token };
-        }
-      } catch {
-        // Ignore and throw formatted error below
-      }
+      return fallbackServerLogin(normalizedEmail, password);
     }
-
-    throw new Error(formatAuthErrorMessage(fbErr, 'Incorrect email or password. Please try again.'));
+    throw new Error(formatAuthErrorMessage(err, 'Sign in failed. Please check your email and password.'));
   }
 }
 
 /**
- * Sends a Firebase password reset email.
+ * Send a password reset email via Firebase Authentication, or reset via security recovery if using fallback.
  */
 export async function requestPasswordReset(email: string): Promise<string> {
-  const cleanEmail = email.trim();
-  if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-    throw new Error('Please enter a valid email address to reset your password.');
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail || !normalizedEmail.includes('@')) {
+    throw new Error('Please enter your registered email address first.');
   }
 
   try {
-    await sendPasswordResetEmail(auth, cleanEmail);
-    return 'Password reset link has been sent to your email address. Please check your inbox.';
-  } catch (fbErr: any) {
-    const code = fbErr?.code || '';
-    if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found') {
-      const res = await fetch('/api/auth/reset-password-request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.error || 'Password reset failed. Please verify your email address.');
-      }
-      return 'Account verified. Enable Email/Password in Firebase Console to receive automated reset emails, or change your password in Settings.';
+    await sendPasswordResetEmail(auth, normalizedEmail);
+    return `A password reset link has been sent to ${normalizedEmail}. Please check your inbox and spam folder.`;
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code || '';
+    if (
+      code === 'auth/operation-not-allowed' ||
+      code === 'auth/configuration-not-found'
+    ) {
+      return `Password reset requested for ${normalizedEmail}. If you enabled a Security Question in Settings, you can also unlock and update your credentials inside Settings.`;
     }
-    throw new Error(formatAuthErrorMessage(fbErr, 'Password reset failed. Please verify your email and try again.'));
+    throw new Error(formatAuthErrorMessage(err, 'Unable to send password reset email. Please verify your email address.'));
   }
 }
 
 /**
- * Changes the currently authenticated user's password.
+ * Change the currently signed-in user's password after verifying their current password.
  */
-export async function changeAccountPassword(currentPassword: string, newPassword: string): Promise<void> {
-  if (!currentPassword) {
-    throw new Error('Please enter your current password.');
-  }
+export async function changeUserPassword(currentPassword: string, newPassword: string): Promise<void> {
   if (!newPassword || newPassword.length < 6) {
     throw new Error('New password must be at least 6 characters long.');
   }
@@ -372,89 +275,155 @@ export async function changeAccountPassword(currentPassword: string, newPassword
       await reauthenticateWithCredential(fbUser, credential);
       await updatePassword(fbUser, newPassword);
       const freshToken = await fbUser.getIdToken(true);
-      if (cachedUser) {
-        persistSession(cachedUser, freshToken, localStorage.getItem(REMEMBER_ME_KEY) !== 'false');
-      }
+      cachedToken = freshToken;
       return;
-    } catch (fbErr: any) {
-      throw new Error(formatAuthErrorMessage(fbErr, 'Failed to change password. Please verify your current password.'));
+    } catch (err: unknown) {
+      throw new Error(formatAuthErrorMessage(err, 'Failed to update password. Please check your current password.'));
     }
   }
 
-  // Fallback for personal server-authenticated account
-  const token = await getFreshAuthToken();
+  const token = getAccessToken();
   if (!token) {
     throw new Error('Your session has expired. Please sign in again.');
   }
+
   const res = await fetch('/api/auth/change-password', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ currentPassword, newPassword }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.error || 'Failed to change password. Please verify your current password.');
+    throw new Error(data.error || 'Failed to update password.');
   }
 }
 
+export const changeAccountPassword = changeUserPassword;
+
 /**
- * Verifies the user's account password for sensitive operations (such as PIN recovery).
+ * Re-authenticates the current Firebase user with their account password for PIN recovery.
  */
-export async function verifyAccountPasswordForRecovery(password: string): Promise<boolean> {
+export async function verifyAccountPasswordForRecovery(accountPassword: string): Promise<boolean> {
   const fbUser = auth.currentUser;
-  if (fbUser && fbUser.email) {
-    const credential = EmailAuthProvider.credential(fbUser.email, password);
-    await reauthenticateWithCredential(fbUser, credential);
-    return true;
+  if (fbUser && fbUser.email && accountPassword) {
+    try {
+      const credential = EmailAuthProvider.credential(fbUser.email, accountPassword);
+      await reauthenticateWithCredential(fbUser, credential);
+      return true;
+    } catch {
+      return false;
+    }
   }
   return false;
 }
 
 /**
- * Returns a fresh Firebase ID Token (or active session token) for backend verification.
+ * Returns a fresh Firebase ID token (or active session token) for backend API calls.
  */
 export async function getFreshAuthToken(): Promise<string | null> {
-  try {
-    if (auth.currentUser) {
+  if (auth.currentUser) {
+    try {
       const fresh = await auth.currentUser.getIdToken();
       cachedToken = fresh;
       return fresh;
+    } catch {
+      return cachedToken;
     }
-  } catch {
-    // Fallback to cached token
   }
-  return getAccessToken();
+  return cachedToken;
 }
 
-export const getAccessToken = (): string | null => {
-  if (cachedToken) return cachedToken;
-  try {
-    return (
-      sessionStorage.getItem(SESSION_TOKEN_KEY) ||
-      localStorage.getItem(SESSION_TOKEN_KEY) ||
-      null
-    );
-  } catch {
-    return null;
+/**
+ * Synchronously returns the latest cached auth token.
+ */
+export function getAccessToken(): string | null {
+  return cachedToken;
+}
+
+/**
+ * Returns the currently cached user profile.
+ */
+export function getSavedUser(): GoogleUser | null {
+  if (auth.currentUser) {
+    return mapFirebaseUser(auth.currentUser);
   }
-};
-
-export const setAccessToken = (token: string | null) => {
-  cachedToken = token;
-};
-
-export const getCurrentUser = (): GoogleUser | null => {
   return cachedUser;
-};
+}
 
-export const logout = async (): Promise<void> => {
+/**
+ * Subscribe to Firebase Authentication state changes.
+ */
+export function initAuth(
+  onAuthenticated: (user: GoogleUser, token: string) => void,
+  onUnauthenticated: () => void
+): () => void {
+  scrubLegacyPlaintextSecurityStorage();
+
+  const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+    if (fbUser) {
+      try {
+        const idToken = await fbUser.getIdToken();
+        const mappedUser = mapFirebaseUser(fbUser);
+        cachedToken = idToken;
+        cachedUser = mappedUser;
+        onAuthenticated(mappedUser, idToken);
+        return;
+      } catch {
+        // Fall through
+      }
+    }
+
+    if (cachedToken && cachedUser) {
+      try {
+        const res = await fetch('/api/auth/session', {
+          headers: { Authorization: `Bearer ${cachedToken}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated && data.user) {
+            cachedUser = data.user;
+            onAuthenticated(data.user, cachedToken);
+            return;
+          }
+        }
+      } catch {
+        // Network error
+      }
+    }
+
+    cachedToken = null;
+    cachedUser = null;
+    onUnauthenticated();
+  });
+
+  return unsubscribe;
+}
+
+/**
+ * Sign out from Firebase Authentication and clear in-memory session tokens.
+ */
+export async function logout(): Promise<void> {
+  const token = cachedToken;
+  cachedToken = null;
+  cachedUser = null;
+
   try {
     await signOut(auth);
   } catch {
-    // Ignore signout error
+    // Ignore Firebase sign-out errors
   }
-  clearPersistedSession();
-};
+
+  if (token) {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      // Ignore network errors during logout
+    }
+  }
+}

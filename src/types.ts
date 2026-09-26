@@ -155,6 +155,7 @@ export interface SpreadsheetInfo {
   driveFolderId?: string;
   driveFolderName?: string;
   driveFolderUrl?: string;
+  driveConnected?: boolean;
   createdTime?: string;
   transactionsCount: number;
   connectionMode?: 'google_sheets_api' | 'apps_script' | 'local_sheet_workbook';

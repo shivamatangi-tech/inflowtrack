@@ -35,6 +35,7 @@ import {
   addCategoryToSheet,
   deleteTransactionRow,
   deleteTransactionsBatch,
+  downloadSheetFromDrive,
 } from './services/sheets';
 import {
   Transaction,
@@ -134,6 +135,8 @@ export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoadingData, setIsLoadingData] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [isDownloadingSheet, setIsDownloadingSheet] = useState<boolean>(false);
+  const [sheetActionNotice, setSheetActionNotice] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Navigation & View State
@@ -319,6 +322,29 @@ export default function App() {
     }
   };
 
+  // Handle Store in Drive & Download Sheet
+  const handleDownloadSheet = async () => {
+    const currentToken = token || getAccessToken();
+    if (!currentToken) return;
+    setIsDownloadingSheet(true);
+    setErrorMessage(null);
+    setSheetActionNotice(null);
+    try {
+      const result = await downloadSheetFromDrive(currentToken);
+      const updatedInfo = await findOrCreateFinanceSpreadsheet(currentToken);
+      if (updatedInfo) {
+        setSheetInfo(updatedInfo);
+      }
+      setSheetActionNotice(
+        `Stored "${updatedInfo?.name || 'inflowtrack'}" in your Google Drive folder and downloaded ${result.fileName}!`
+      );
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to store and download sheet.');
+    } finally {
+      setIsDownloadingSheet(false);
+    }
+  };
+
   // Handle Save New Transaction
   const handleSaveTransaction = async (newTx: {
     date: string;
@@ -464,12 +490,12 @@ export default function App() {
   // Loading Splash Screen
   if (isAuthLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4 transition-colors">
-        <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg mb-4 animate-pulse">
-          <Wallet className="w-6 h-6 text-white" />
+      <div className="min-h-screen bg-[#F4F3EF] dark:bg-[#111110] flex flex-col items-center justify-center p-4 transition-colors">
+        <div className="w-12 h-12 rounded-2xl bg-[#181816] dark:bg-[#F4F3EF] text-white dark:text-[#181816] flex items-center justify-center font-display font-bold text-xl mb-3 animate-pulse shadow-sm">
+          i
         </div>
-        <p className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
-          Connecting to inflotrack...
+        <p className="text-xs font-medium text-[#78756E] dark:text-[#9C9990]">
+          Opening inflotrack workspace...
         </p>
       </div>
     );
@@ -491,12 +517,14 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans antialiased transition-colors duration-200">
+    <div className="min-h-screen bg-[#F4F3EF] dark:bg-[#111110] text-[#181816] dark:text-[#F4F3EF] flex flex-col font-sans antialiased transition-colors duration-150">
       {/* Top Header with Desktop Navigation Tabs */}
       <Header
         sheetInfo={sheetInfo}
         onRefresh={handleManualRefresh}
         isRefreshing={isRefreshing}
+        onDownloadSheet={handleDownloadSheet}
+        isDownloadingSheet={isDownloadingSheet}
         onOpenSettings={() => {
           setIsDesktopSettingsOpen(true);
           setActiveMobileTab('settings');
@@ -515,6 +543,44 @@ export default function App() {
         currentTheme={currentTheme}
         onThemeChange={handleThemeChange}
       />
+
+      {/* Sheet Stored & Downloaded Notice Banner */}
+      {sheetActionNotice && (
+        <div className="bg-emerald-50 dark:bg-emerald-950/60 border-b border-emerald-200 dark:border-emerald-800 px-4 py-2.5">
+          <div className="max-w-7xl mx-auto flex items-center justify-between text-xs font-medium text-emerald-800 dark:text-emerald-300">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span>{sheetActionNotice}</span>
+              {sheetInfo?.driveFolderUrl && (
+                <a
+                  href={sheetInfo.driveFolderUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline font-bold text-emerald-900 dark:text-emerald-200 hover:text-emerald-700"
+                >
+                  Open Drive Folder
+                </a>
+              )}
+              {sheetInfo?.url && (
+                <a
+                  href={sheetInfo.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline font-bold text-emerald-900 dark:text-emerald-200 hover:text-emerald-700"
+                >
+                  Open inflowtrack Sheet
+                </a>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setSheetActionNotice(null)}
+              className="p-0.5 text-emerald-600 hover:text-emerald-800 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Inactivity Lock Banner */}
       {inactivityNotice && !isUnlocked && (
@@ -590,31 +656,16 @@ export default function App() {
                   onMonthChange={setSelectedDashboardMonth}
                 />
 
-                {/* 1. Top Action Buttons (+ Income & − Expense) */}
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    id="mobile-btn-add-income"
-                    onClick={handleOpenAddIncome}
-                    className="py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
-                  >
-                    <Plus className="w-4 h-4 stroke-[2.5]" />
-                    <span>+ Income</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    id="mobile-btn-add-expense"
-                    onClick={handleOpenAddExpense}
-                    className="py-3 px-4 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
-                  >
-                    <Minus className="w-4 h-4 stroke-[2.5]" />
-                    <span>− Expense</span>
-                  </button>
-                </div>
-
-                {/* 2. Mobile Summary Cards */}
-                <SummaryCards stats={stats} />
+                {/* 1. Stacked Card + Total Balance + Circular Quick Actions + KPIs */}
+                <SummaryCards
+                  stats={stats}
+                  overallNetBalance={overallStats.netBalance}
+                  userName={currentUser.displayName || currentUser.email}
+                  onQuickAction={(type) => {
+                    setPreSelectedType(type);
+                    setActiveMobileTab('add');
+                  }}
+                />
 
                 {/* 4. Mobile Monthly Income vs Expenses Comparison Chart */}
                 <MonthlyComparisonChart
@@ -637,6 +688,8 @@ export default function App() {
                   onUpdateTransaction={handleUpdateTransaction}
                   onApplyRecurring={handleApplyRecurring}
                   selectedMonth={selectedDashboardMonth}
+                  onDownloadSheet={handleDownloadSheet}
+                  isDownloadingSheet={isDownloadingSheet}
                 />
               </motion.div>
             )}
@@ -736,6 +789,7 @@ export default function App() {
                     setPinModalMode('change');
                     setIsPinModalOpen(true);
                   }}
+                  onSheetInfoChange={(updatedInfo) => setSheetInfo(updatedInfo)}
                 />
               </motion.div>
             )}
@@ -762,8 +816,19 @@ export default function App() {
                   onMonthChange={setSelectedDashboardMonth}
                 />
 
-                {/* Top Metric Cards: Total Income, Total Expenses, Net Balance, Leftover Balance */}
-                <SummaryCards stats={stats} />
+                {/* Top Metric Cards: Stacked Card Hero, Circular Actions & KPIs */}
+                <SummaryCards
+                  stats={stats}
+                  overallNetBalance={overallStats.netBalance}
+                  userName={currentUser.displayName || currentUser.email}
+                  onQuickAction={(type) => {
+                    setPreSelectedType(type);
+                    const formEl = document.getElementById('add-transaction-card');
+                    if (formEl) {
+                      formEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                  }}
+                />
 
                 {/* Comparison & Category Breakdown Row */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -812,6 +877,8 @@ export default function App() {
                   onUpdateTransaction={handleUpdateTransaction}
                   onApplyRecurring={handleApplyRecurring}
                   selectedMonth={selectedDashboardMonth}
+                  onDownloadSheet={handleDownloadSheet}
+                  isDownloadingSheet={isDownloadingSheet}
                 />
               </motion.div>
             ) : (
@@ -838,22 +905,21 @@ export default function App() {
 
       {/* Desktop Settings Modal */}
       {isDesktopSettingsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
           <div
             id="desktop-settings-modal"
-            className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-slate-200 dark:border-slate-800 relative transition-colors"
+            className="bg-white dark:bg-[#181816] rounded-[28px] max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-[#E2DFD9] dark:border-[#2A2A27] relative transition-colors"
           >
             <button
               type="button"
               onClick={() => setIsDesktopSettingsOpen(false)}
-              className="absolute top-5 right-5 p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              className="absolute top-5 right-5 w-9 h-9 flex items-center justify-center text-[#78756E] hover:text-[#181816] dark:hover:text-white bg-[#F4F3EF] dark:bg-[#22221F] rounded-full transition-colors cursor-pointer"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
 
-            <h2 className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-6 flex items-center gap-2">
-              <Wallet className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              Settings & Preferences
+            <h2 className="font-display text-lg font-semibold text-[#181816] dark:text-[#F4F3EF] tracking-tight mb-6">
+              Workspace Settings
             </h2>
 
             <SettingsView
@@ -877,6 +943,7 @@ export default function App() {
                 setPinModalMode('change');
                 setIsPinModalOpen(true);
               }}
+              onSheetInfoChange={(updatedInfo) => setSheetInfo(updatedInfo)}
             />
           </div>
         </div>
