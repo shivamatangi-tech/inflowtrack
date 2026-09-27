@@ -39,6 +39,16 @@ import {
   ArrowDown,
   ArrowUp,
   X,
+  Edit3,
+  Check,
+  LockOpen,
+  Lock,
+  Unlock,
+  KeyRound,
+  ShieldAlert,
+  Eye,
+  EyeOff,
+  Loader2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -73,12 +83,18 @@ import { TopUpWithdrawIconBadge } from '../utils/categoryIcons';
 import {
   getAllVaultCards,
   addCustomVaultCard,
-  removeCustomVaultCard,
+  updateVaultCard,
   getCardThemeClasses,
   VaultCardItem,
   CardThemeFinish,
   CardNetwork,
 } from '../utils/customCards';
+import {
+  hasSecurityPinSet,
+  verifySecurityPinWithServer,
+  updateSecurityPinWithServer,
+} from '../utils/security';
+import { getFreshAuthToken } from '../services/firebase';
 
 interface GoalsViewProps {
   transactions: Transaction[];
@@ -362,6 +378,26 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
   const [swipeDirection, setSwipeDirection] = useState<number>(1);
   const [isAddCardOpen, setIsAddCardOpen] = useState<boolean>(false);
 
+  // Card details lock/unlock state (requires PIN to reveal full details and edit)
+  const [isCardUnlocked, setIsCardUnlocked] = useState<boolean>(Boolean(isUnlocked));
+
+  // Sync with global isUnlocked prop if parent unlocks
+  React.useEffect(() => {
+    if (isUnlocked) {
+      setIsCardUnlocked(true);
+    }
+  }, [isUnlocked]);
+
+  // PIN Authorization Modal state for editing & unlocking cards
+  const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
+  const [pinInput, setPinInput] = useState<string>('');
+  const [newPinConfirm, setNewPinConfirm] = useState<string>('');
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [isVerifyingPin, setIsVerifyingPin] = useState<boolean>(false);
+  const [isSettingUpPin, setIsSettingUpPin] = useState<boolean>(false);
+  const [pendingCardToEdit, setPendingCardToEdit] = useState<VaultCardItem | null>(null);
+  const [showPinText, setShowPinText] = useState<boolean>(false);
+
   // Add New Card Form state
   const [newCardName, setNewCardName] = useState('');
   const [newCardLast4, setNewCardLast4] = useState('');
@@ -370,6 +406,20 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
   const [newCardTier, setNewCardTier] = useState('Signature');
   const [newCardTheme, setNewCardTheme] = useState<CardThemeFinish>('obsidian');
   const [addCardError, setAddCardError] = useState<string | null>(null);
+
+  // Edit Card Form state (PIN verified first; deletion permanently disallowed)
+  const [isEditCardOpen, setIsEditCardOpen] = useState<boolean>(false);
+  const [editingCardId, setEditingCardId] = useState<string | null>(null);
+  const [editCardName, setEditCardName] = useState('');
+  const [editCardPrefix4, setEditCardPrefix4] = useState('4532');
+  const [editCardMiddleDigits, setEditCardMiddleDigits] = useState('8841 9200');
+  const [editCardLast4, setEditCardLast4] = useState('');
+  const [editCardExpiry, setEditCardExpiry] = useState('12/29');
+  const [editCardNetwork, setEditCardNetwork] = useState<CardNetwork>('VISA');
+  const [editCardTier, setEditCardTier] = useState('Signature');
+  const [editCardTheme, setEditCardTheme] = useState<CardThemeFinish>('obsidian');
+  const [editCardError, setEditCardError] = useState<string | null>(null);
+  const [editCardSuccess, setEditCardSuccess] = useState<string | null>(null);
 
   const totalCards = vaultCards.length;
   const safeActiveIndex = totalCards > 0 ? ((activeCardIndex % totalCards) + totalCards) % totalCards : 0;
@@ -395,6 +445,151 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
     if (idx === safeActiveIndex) return;
     setSwipeDirection(idx > safeActiveIndex ? 1 : -1);
     setActiveCardIndex(idx);
+  };
+
+  /**
+   * Request to edit card details: requires entering PIN if currently locked.
+   */
+  const handleRequestEditCard = (card: VaultCardItem) => {
+    if (!isCardUnlocked) {
+      setPendingCardToEdit(card);
+      setPinInput('');
+      setNewPinConfirm('');
+      setPinError(null);
+      setIsSettingUpPin(!hasSecurityPinSet());
+      setIsPinModalOpen(true);
+      return;
+    }
+    handleOpenEditCard(card);
+  };
+
+  /**
+   * Request to toggle lock / unlock without immediately editing.
+   */
+  const handleRequestUnlockOnly = () => {
+    if (isCardUnlocked) {
+      setIsCardUnlocked(false);
+      return;
+    }
+    setPendingCardToEdit(null);
+    setPinInput('');
+    setNewPinConfirm('');
+    setPinError(null);
+    setIsSettingUpPin(!hasSecurityPinSet());
+    setIsPinModalOpen(true);
+  };
+
+  const handleVerifyOrSetupPin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setPinError(null);
+
+    const clean = pinInput.trim();
+    if (clean.length !== 4 || !/^\d{4}$/.test(clean)) {
+      setPinError('Please enter a valid 4-digit PIN.');
+      return;
+    }
+
+    setIsVerifyingPin(true);
+    try {
+      const token = await getFreshAuthToken();
+      if (!token) throw new Error('Session expired. Please sign in again.');
+
+      if (isSettingUpPin) {
+        if (clean !== newPinConfirm.trim()) {
+          setPinError('PIN confirmation does not match.');
+          setIsVerifyingPin(false);
+          return;
+        }
+        const setRes = await updateSecurityPinWithServer(token, { newPin: clean });
+        if (!setRes.success) {
+          setPinError(setRes.error || 'Failed to setup PIN.');
+          setIsVerifyingPin(false);
+          return;
+        }
+      } else {
+        const verifyRes = await verifySecurityPinWithServer(token, clean);
+        if (!verifyRes.verified) {
+          // If server says no PIN configured or failed, check if user should set up PIN
+          if (verifyRes.error && verifyRes.error.toLowerCase().includes('no pin')) {
+            setIsSettingUpPin(true);
+            setPinError('No PIN was found. Please confirm this 4-digit PIN to set it.');
+            setIsVerifyingPin(false);
+            return;
+          }
+          setPinError(verifyRes.error || 'Incorrect PIN. Please try again.');
+          setIsVerifyingPin(false);
+          return;
+        }
+      }
+
+      // PIN Verified Successfully! Full card details are unlocked
+      setIsCardUnlocked(true);
+      setIsPinModalOpen(false);
+      const targetCard = pendingCardToEdit;
+      setPendingCardToEdit(null);
+      setPinInput('');
+      setNewPinConfirm('');
+
+      // If user requested to edit a card, open edit card modal
+      if (targetCard) {
+        handleOpenEditCard(targetCard);
+      }
+    } catch (err: any) {
+      setPinError(err.message || 'Verification failed. Please try again.');
+    } finally {
+      setIsVerifyingPin(false);
+    }
+  };
+
+  const handleOpenEditCard = (card: VaultCardItem) => {
+    setEditingCardId(card.id);
+    setEditCardName(card.name);
+    setEditCardPrefix4(card.prefix4 || '4532');
+    setEditCardMiddleDigits(card.middleDigits || '8841 9200');
+    setEditCardLast4(card.last4 || '6789');
+    setEditCardExpiry(card.expiry || '12/29');
+    setEditCardNetwork(card.network || 'VISA');
+    setEditCardTier(card.tier || 'Signature');
+    setEditCardTheme(card.theme || 'obsidian');
+    setEditCardError(null);
+    setEditCardSuccess(null);
+    setIsEditCardOpen(true);
+  };
+
+  const handleSaveEditCard = (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditCardError(null);
+
+    if (!editingCardId) return;
+
+    const cleanName = editCardName.trim();
+    if (!cleanName) {
+      setEditCardError('Please enter a valid card or bank name.');
+      return;
+    }
+
+    const cleanLast4 = editCardLast4.replace(/\D/g, '').slice(-4).padStart(4, '8');
+    const cleanPrefix4 = editCardPrefix4.replace(/\D/g, '').slice(0, 4).padEnd(4, '4');
+    const cleanMiddle = editCardMiddleDigits.trim() || '8841 9200';
+    const cleanExpiry = editCardExpiry.trim() || '12/29';
+
+    const updated = updateVaultCard(editingCardId, {
+      name: cleanName,
+      last4: cleanLast4,
+      prefix4: cleanPrefix4,
+      middleDigits: cleanMiddle,
+      expiry: cleanExpiry,
+      network: editCardNetwork,
+      tier: editCardTier.trim() || 'Standard',
+      theme: editCardTheme,
+    });
+
+    setVaultCards(updated);
+    setEditCardSuccess('Card details updated successfully!');
+    setTimeout(() => {
+      setIsEditCardOpen(false);
+      setEditCardSuccess(null);
+    }, 600);
   };
 
   const handleAddCardSubmit = (e: React.FormEvent) => {
@@ -433,13 +628,6 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
     setNewCardLast4('');
     setNewCardExpiry('12/29');
     setIsAddCardOpen(false);
-  };
-
-  const handleRemoveActiveCustomCard = () => {
-    if (!activeCard || activeCard.isDefault) return;
-    const updated = removeCustomVaultCard(activeCard.id);
-    setVaultCards(updated);
-    setActiveCardIndex(0);
   };
 
   // Compute activity breakdown by Payment Card / Mode (including user's custom cards)
@@ -529,16 +717,35 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
-              {!activeCard?.isDefault && (
-                <button
-                  type="button"
-                  onClick={handleRemoveActiveCustomCard}
-                  title="Remove this custom card"
-                  className="min-h-[42px] min-w-[42px] p-2 rounded-xl border border-rose-200 dark:border-rose-900/50 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center justify-center transition-colors cursor-pointer"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              )}
+              <button
+                type="button"
+                id="btn-toggle-card-lock"
+                onClick={handleRequestUnlockOnly}
+                title={isCardUnlocked ? 'Lock card details' : 'Unlock full card details with PIN'}
+                className="min-h-[42px] px-3 py-2 rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] bg-[#F6F5F0] hover:bg-[#EFECE4] dark:bg-[#22211D] dark:hover:bg-[#2C2A25] text-[#141412] dark:text-[#F6F5F0] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs"
+              >
+                {isCardUnlocked ? (
+                  <>
+                    <Unlock className="w-3.5 h-3.5 text-[#C5A059] shrink-0" />
+                    <span className="hidden sm:inline">Lock</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-3.5 h-3.5 text-[#8E7952] dark:text-[#C5A059] shrink-0" />
+                    <span className="hidden sm:inline">Unlock</span>
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                id="btn-open-edit-card-modal"
+                onClick={() => handleRequestEditCard(activeCard)}
+                title="Edit card details (enter PIN if locked, no account password required)"
+                className="min-h-[42px] px-3.5 py-2 rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] bg-[#F6F5F0] hover:bg-[#EFECE4] dark:bg-[#22211D] dark:hover:bg-[#2C2A25] text-[#141412] dark:text-[#F6F5F0] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs"
+              >
+                <Edit3 className="w-3.5 h-3.5 text-[#C5A059] shrink-0" />
+                <span>Edit Card</span>
+              </button>
               <button
                 type="button"
                 id="btn-open-add-card-modal"
@@ -569,7 +776,9 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                   {prevCard.name}
                 </div>
                 <div className="text-[11px] tracking-widest tabular-nums opacity-85">
-                  {prevCard.prefix4} ••••
+                  {isCardUnlocked
+                    ? `${prevCard.prefix4} •••• •••• ${prevCard.last4}`
+                    : `•••• •••• •••• ${prevCard.last4}`}
                 </div>
               </div>
             )}
@@ -623,16 +832,65 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                       ▲ {activeCard.name}
                     </span>
                   </div>
-                  <Wifi className="w-4 h-4 opacity-80 rotate-90 shrink-0" />
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRequestEditCard(activeCard);
+                      }}
+                      title="Edit card details (enter PIN if locked, no account password required)"
+                      className="px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      <span>Edit</span>
+                    </button>
+                    <Wifi className="w-4 h-4 opacity-80 rotate-90 shrink-0" />
+                  </div>
                 </div>
 
-                {/* Metallic Chip & Card Number */}
+                {/* Metallic Chip, Security Lock State & Card Number */}
                 <div className="space-y-2 my-auto pt-1">
-                  <div
-                    className={`w-8 sm:w-9 h-5.5 sm:h-6 rounded-md bg-gradient-to-br ${activeTheme.chip} border border-white/25 opacity-90`}
-                  />
+                  <div className="flex items-center justify-between">
+                    <div
+                      className={`w-8 sm:w-9 h-5.5 sm:h-6 rounded-md bg-gradient-to-br ${activeTheme.chip} border border-white/25 opacity-90`}
+                    />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isCardUnlocked) {
+                          setIsCardUnlocked(false);
+                        } else {
+                          handleRequestUnlockOnly();
+                        }
+                      }}
+                      title={
+                        isCardUnlocked
+                          ? 'Card details unlocked · Click to lock'
+                          : 'Card details locked · Click to unlock with PIN'
+                      }
+                      className="px-2 py-0.5 rounded-full bg-black/40 hover:bg-black/60 text-[9px] font-medium text-white/90 border border-white/15 flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      {isCardUnlocked ? (
+                        <>
+                          <Unlock className="w-2.5 h-2.5 text-[#C5A059]" />
+                          <span>Full Details Unlocked</span>
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="w-2.5 h-2.5 text-white/70" />
+                          <span>Locked · Ending in {activeCard.last4}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Masked when locked, Full 16 digits when unlocked */}
                   <div className="text-[11px] sm:text-[13px] tracking-[0.15em] sm:tracking-[0.18em] font-medium tabular-nums truncate">
-                    {activeCard.prefix4} •••• •••• {activeCard.last4}
+                    {isCardUnlocked
+                      ? `${activeCard.prefix4 || '4532'} ${activeCard.middleDigits || '8841 9200'} ${activeCard.last4}`
+                      : `•••• •••• •••• ${activeCard.last4}`}
                   </div>
                 </div>
 
@@ -640,7 +898,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                 <div className="flex items-end justify-between gap-2 pt-1">
                   <div className="min-w-0">
                     <div className={`text-[9px] ${activeTheme.subtext} tracking-wider`}>
-                      VALID {activeCard.expiry}
+                      {isCardUnlocked ? `VALID ${activeCard.expiry}` : 'VALID ••/••'}
                     </div>
                     <div className="text-[10px] font-medium tracking-wider truncate max-w-[135px] sm:max-w-[145px] mt-0.5">
                       {cardHolder}
@@ -788,9 +1046,8 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
               const isFocusedInDeck = matchingDeckIdx >= 0 && matchingDeckIdx === safeActiveIndex;
 
               return (
-                <button
+                <div
                   key={card.name}
-                  type="button"
                   onClick={() => {
                     if (matchingDeckIdx >= 0) {
                       handleSelectCardIndex(matchingDeckIdx);
@@ -829,21 +1086,43 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                       <div className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] truncate">
                         {card.name}
                       </div>
-                      <div className="text-[11px] text-[#78746B] dark:text-[#9E9B92] tabular-nums">
+                      <div className="text-[10px] font-mono text-[#8E7952] dark:text-[#C5A059] tracking-wider truncate">
+                        {matchingDeckIdx >= 0
+                          ? isCardUnlocked
+                            ? `${vaultCards[matchingDeckIdx].prefix4 || '4532'} ${vaultCards[matchingDeckIdx].middleDigits || '8841 9200'} ${vaultCards[matchingDeckIdx].last4}`
+                            : `•••• •••• •••• ${vaultCards[matchingDeckIdx].last4}`
+                          : `${card.count} ${card.count === 1 ? 'transaction' : 'transactions'}`}
+                      </div>
+                      <div className="text-[10px] text-[#78746B] dark:text-[#9E9B92] tabular-nums">
                         {card.count} {card.count === 1 ? 'transaction' : 'transactions'}
                       </div>
                     </div>
                   </div>
 
-                  <div className="text-right shrink-0">
-                    <div className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] tabular-nums">
-                      {displayAmount(card.spent)}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="text-right">
+                      <div className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] tabular-nums">
+                        {displayAmount(card.spent)}
+                      </div>
+                      <div className="text-[10px] text-[#8E7952] dark:text-[#C5A059]">
+                        {isFocusedInDeck ? 'Active on Deck' : 'Spent'}
+                      </div>
                     </div>
-                    <div className="text-[10px] text-[#8E7952] dark:text-[#C5A059]">
-                      {isFocusedInDeck ? 'Active on Deck' : 'Spent'}
-                    </div>
+                    {matchingDeckIdx >= 0 && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRequestEditCard(vaultCards[matchingDeckIdx]);
+                        }}
+                        title="Edit card details (requires PIN to unlock)"
+                        className="w-7 h-7 rounded-lg bg-white/80 dark:bg-[#282622] hover:bg-[#E5E0D4] dark:hover:bg-[#34322C] text-[#78746B] hover:text-[#141412] dark:hover:text-[#F6F5F0] flex items-center justify-center transition-colors cursor-pointer"
+                      >
+                        <Edit3 className="w-3.5 h-3.5 text-[#C5A059]" />
+                      </button>
+                    )}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -996,6 +1275,384 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                   className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold transition-all cursor-pointer"
                 >
                   Save Card to Deck
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Card Details Modal (No password required; deletion disabled) */}
+      {isEditCardOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
+          <div
+            id="edit-vault-card-modal"
+            className="bg-white dark:bg-[#161614] rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 border border-[#E5E0D4] dark:border-[#282622] shadow-2xl relative"
+          >
+            <button
+              type="button"
+              onClick={() => setIsEditCardOpen(false)}
+              className="absolute top-3.5 right-3.5 w-9 h-9 rounded-full bg-[#F6F5F0] dark:bg-[#22211D] text-[#78746B] hover:text-[#141412] dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[#C5A059]/15 text-[#8E7952] dark:text-[#C5A059] border border-[#C5A059]/30">
+                <Unlock className="w-3 h-3" />
+                PIN Verified · Details Unlocked
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[#F6F5F0] dark:bg-[#22211D] text-[#5E5B52] dark:text-[#A39F95] border border-[#E5E0D4] dark:border-[#2C2A25]">
+                <LockOpen className="w-3 h-3" />
+                No Account Password Needed
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                <ShieldCheck className="w-3 h-3" />
+                Card Deletion Disabled
+              </span>
+            </div>
+
+            <h3 className="font-display text-xl sm:text-2xl font-semibold text-[#141412] dark:text-[#F6F5F0] mt-1 mb-1 pr-8">
+              Edit Card Details
+            </h3>
+            <p className="text-xs text-[#78746B] dark:text-[#9E9B92] mb-4">
+              Your card details are unlocked with your PIN. Modify numbers, expiry, network, or visual finishes freely without entering your account password. Card deletion is permanently disabled to safeguard your transaction history.
+            </p>
+
+            {editCardError && (
+              <div className="mb-3 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
+                {editCardError}
+              </div>
+            )}
+
+            {editCardSuccess && (
+              <div className="mb-3 p-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#C5A059]/50 text-xs text-[#8E7952] dark:text-[#C5A059] flex items-center gap-1.5 font-medium">
+                <Check className="w-4 h-4" />
+                <span>{editCardSuccess}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditCard} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                  Card or Bank Name
+                </label>
+                <input
+                  type="text"
+                  value={editCardName}
+                  onChange={(e) => setEditCardName(e.target.value)}
+                  placeholder="e.g., HDFC Millennia, ICICI Sapphiro, SBI Cashback"
+                  className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 min-[360px]:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                    First 4 Digits
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={editCardPrefix4}
+                    onChange={(e) => setEditCardPrefix4(e.target.value.replace(/\D/g, ''))}
+                    placeholder="4532"
+                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium tabular-nums text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                    Middle 8 Digits
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={9}
+                    value={editCardMiddleDigits}
+                    onChange={(e) => setEditCardMiddleDigits(e.target.value)}
+                    placeholder="8841 9200"
+                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium tabular-nums text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                    Last 4 Digits
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={editCardLast4}
+                    onChange={(e) => setEditCardLast4(e.target.value.replace(/\D/g, ''))}
+                    placeholder="6789"
+                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium tabular-nums text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 min-[360px]:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                    Expiry (MM/YY)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={5}
+                    value={editCardExpiry}
+                    onChange={(e) => setEditCardExpiry(e.target.value)}
+                    placeholder="12/29"
+                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium tabular-nums text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                    Card Network
+                  </label>
+                  <select
+                    value={editCardNetwork}
+                    onChange={(e) => setEditCardNetwork(e.target.value as CardNetwork)}
+                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059] cursor-pointer"
+                  >
+                    <option value="VISA">VISA</option>
+                    <option value="Mastercard">Mastercard</option>
+                    <option value="RuPay">RuPay</option>
+                    <option value="AMEX">AMEX</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                    Card Tier
+                  </label>
+                  <input
+                    type="text"
+                    value={editCardTier}
+                    onChange={(e) => setEditCardTier(e.target.value)}
+                    placeholder="Signature / Platinum"
+                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1.5">
+                  Card Theme Finish
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {[
+                    { id: 'obsidian', label: 'Obsidian Black', color: 'bg-[#181816]' },
+                    { id: 'champagne', label: 'Champagne Gold', color: 'bg-[#C5A059]' },
+                    { id: 'navy', label: 'Sovereign Navy', color: 'bg-[#1E293B]' },
+                    { id: 'platinum', label: 'Warm Platinum', color: 'bg-[#DCD8CF]' },
+                    { id: 'espresso', label: 'Deep Espresso', color: 'bg-[#2E1E17]' },
+                  ].map((thm) => {
+                    const isSelected = editCardTheme === thm.id;
+                    return (
+                      <button
+                        key={thm.id}
+                        type="button"
+                        onClick={() => setEditCardTheme(thm.id as CardThemeFinish)}
+                        className={`p-2.5 rounded-xl text-left border flex items-center justify-between transition-all cursor-pointer ${
+                          isSelected
+                            ? 'border-[#C5A059] ring-2 ring-[#C5A059]/40 bg-[#F6F5F0] dark:bg-[#22211D]'
+                            : 'border-[#E5E0D4] dark:border-[#282622] hover:border-[#C5A059]/40'
+                        }`}
+                      >
+                        <span className="text-[11px] font-medium text-[#141412] dark:text-[#F6F5F0]">
+                          {thm.label}
+                        </span>
+                        <span
+                          className={`w-3.5 h-3.5 rounded-full ${thm.color} border border-white/20 shrink-0`}
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="pt-2 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 border-t border-[#E5E0D4] dark:border-[#282622]">
+                <span className="text-[11px] text-[#78746B] dark:text-[#9E9B92]">
+                  Unlocked with PIN · No password required
+                </span>
+                <div className="flex items-center gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditCardOpen(false)}
+                    className="min-h-[42px] px-3.5 py-2 rounded-xl text-xs font-medium text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-white transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="min-h-[42px] px-4 py-2 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Save Card Details</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* PIN Verification Modal to Unlock and Edit Card Details */}
+      {isPinModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
+          <div
+            id="card-pin-auth-modal"
+            className="bg-white dark:bg-[#161614] rounded-2xl max-w-sm w-full p-5 sm:p-6 border border-[#E5E0D4] dark:border-[#282622] shadow-2xl relative"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setIsPinModalOpen(false);
+                setPinError(null);
+                setPendingCardToEdit(null);
+              }}
+              className="absolute top-3.5 right-3.5 w-9 h-9 rounded-full bg-[#F6F5F0] dark:bg-[#22211D] text-[#78746B] hover:text-[#141412] dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="w-12 h-12 rounded-2xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] flex items-center justify-center mb-3">
+              <KeyRound className="w-6 h-6 text-[#C5A059]" />
+            </div>
+
+            <p className="text-[10px] font-medium tracking-[0.16em] uppercase text-[#8E7952] dark:text-[#C5A059]">
+              Card Security &amp; Access Control
+            </p>
+            <h3 className="font-display text-xl font-semibold text-[#141412] dark:text-[#F6F5F0] mt-0.5 mb-1.5">
+              {isSettingUpPin ? 'Set 4-Digit Security PIN' : 'Enter PIN to Unlock Card'}
+            </h3>
+            <p className="text-xs text-[#78746B] dark:text-[#9E9B92] mb-4">
+              {isSettingUpPin
+                ? 'Create a 4-digit PIN to protect and unlock your card details. Once unlocked with your PIN, you can edit card details freely without entering your account password.'
+                : 'Enter your 4-digit security PIN to unlock full card details and edit. No account password is required.'}
+            </p>
+
+            {pinError && (
+              <div className="mb-3.5 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 font-medium">
+                {pinError}
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyOrSetupPin} className="space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-medium text-[#5E5B52] dark:text-[#A39F95]">
+                    {isSettingUpPin ? 'New 4-Digit PIN' : 'Security PIN (4 Digits)'}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowPinText(!showPinText)}
+                    className="text-[11px] text-[#8E7952] dark:text-[#C5A059] hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    {showPinText ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    <span>{showPinText ? 'Hide' : 'Show'}</span>
+                  </button>
+                </div>
+
+                <div className="relative">
+                  <input
+                    type={showPinText ? 'text' : 'password'}
+                    inputMode="numeric"
+                    pattern="\d*"
+                    maxLength={4}
+                    value={pinInput}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                      setPinInput(val);
+                      setPinError(null);
+                    }}
+                    placeholder="••••"
+                    className="w-full h-12 text-center text-xl tracking-[0.4em] font-mono font-bold bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] rounded-xl text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              {isSettingUpPin && (
+                <div>
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1.5">
+                    Confirm 4-Digit PIN
+                  </label>
+                  <input
+                    type={showPinText ? 'text' : 'password'}
+                    inputMode="numeric"
+                    pattern="\d*"
+                    maxLength={4}
+                    value={newPinConfirm}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                      setNewPinConfirm(val);
+                      setPinError(null);
+                    }}
+                    placeholder="••••"
+                    className="w-full h-12 text-center text-xl tracking-[0.4em] font-mono font-bold bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] rounded-xl text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+              )}
+
+              {/* On-screen numeric keypad */}
+              <div className="grid grid-cols-3 gap-1.5 pt-1">
+                {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map((digit) => (
+                  <button
+                    key={digit}
+                    type="button"
+                    onClick={() => {
+                      if (digit === 'C') {
+                        setPinInput('');
+                        if (isSettingUpPin) setNewPinConfirm('');
+                        setPinError(null);
+                      } else if (digit === '⌫') {
+                        setPinInput((prev) => prev.slice(0, -1));
+                        setPinError(null);
+                      } else {
+                        if (pinInput.length < 4) {
+                          const next = (pinInput + digit).slice(0, 4);
+                          setPinInput(next);
+                          setPinError(null);
+                        } else if (isSettingUpPin && newPinConfirm.length < 4) {
+                          setNewPinConfirm((prev) => (prev + digit).slice(0, 4));
+                          setPinError(null);
+                        }
+                      }
+                    }}
+                    className="h-10 rounded-xl bg-[#F6F5F0] hover:bg-[#EFECE4] dark:bg-[#22211D] dark:hover:bg-[#2C2A25] border border-[#E5E0D4] dark:border-[#2C2A25] text-sm font-semibold text-[#141412] dark:text-[#F6F5F0] flex items-center justify-center transition-colors cursor-pointer select-none"
+                  >
+                    {digit}
+                  </button>
+                ))}
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 border-t border-[#E5E0D4] dark:border-[#282622]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPinModalOpen(false);
+                    setPinError(null);
+                    setPendingCardToEdit(null);
+                  }}
+                  className="min-h-[42px] px-3.5 py-2 text-xs font-medium text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-white transition-colors cursor-pointer text-center"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isVerifyingPin || pinInput.length !== 4 || (isSettingUpPin && newPinConfirm.length !== 4)}
+                  className="min-h-[42px] px-5 py-2 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isVerifyingPin ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Unlock className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {isVerifyingPin
+                      ? 'Verifying...'
+                      : pendingCardToEdit
+                      ? 'Unlock & Edit Card'
+                      : 'Unlock Card Details'}
+                  </span>
                 </button>
               </div>
             </form>

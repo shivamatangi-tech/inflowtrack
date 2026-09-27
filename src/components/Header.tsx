@@ -75,9 +75,9 @@ export const Header: React.FC<HeaderProps> = ({
             setIsMobileDrawerOpen(false);
             if (onTabChange) onTabChange('dashboard');
           }}
-          className="font-display text-2xl sm:text-[26px] font-semibold tracking-tight text-[#141412] dark:text-[#F6F5F0] whitespace-nowrap shrink-0"
+          className="text-2xl sm:text-[26px] font-bold tracking-tight text-[#141412] dark:text-[#F6F5F0] whitespace-nowrap shrink-0 flex items-center gap-2"
         >
-          inflotrack
+          <span>inflowtrack</span>
         </a>
 
         {/* Zone 2: Minimal Clean Typography Navigation Links (Desktop / Tablet) */}
@@ -223,7 +223,7 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => handleNavClick(() => onTabChange('dashboard'))}
               className="w-full min-h-[44px] px-3.5 rounded-xl flex items-center justify-between text-xs font-medium text-[#141412] dark:text-[#F6F5F0] hover:bg-white dark:hover:bg-[#1E1E1B] transition-colors cursor-pointer"
             >
-              <span>Executive Overview</span>
+              <span>Dashboard Overview</span>
               <ArrowUpRight className="w-4 h-4 text-[#C5A059]" />
             </button>
           )}
@@ -233,7 +233,7 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => handleNavClick(() => onTabChange('goals'))}
               className="w-full min-h-[44px] px-3.5 rounded-xl flex items-center justify-between text-xs font-medium text-[#141412] dark:text-[#F6F5F0] hover:bg-white dark:hover:bg-[#1E1E1B] transition-colors cursor-pointer"
             >
-              <span>Cards, Vault & Goals</span>
+              <span>Cards & Goals</span>
               <ArrowUpRight className="w-4 h-4 text-[#C5A059]" />
             </button>
           )}
@@ -252,7 +252,7 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => handleNavClick(onOpenSettings)}
             className="w-full min-h-[44px] px-3.5 rounded-xl flex items-center justify-between text-xs font-medium text-[#141412] dark:text-[#F6F5F0] hover:bg-white dark:hover:bg-[#1E1E1B] transition-colors cursor-pointer"
           >
-            <span>Workspace Preferences & PIN</span>
+            <span>Settings & Security PIN</span>
             <Settings className="w-4 h-4 text-[#C5A059]" />
           </button>
         </div>

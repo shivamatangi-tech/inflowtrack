@@ -38,6 +38,7 @@ export interface GoogleUser {
   uid: string;
   email: string | null;
   displayName: string | null;
+  username?: string | null;
   photoURL: string | null;
   authProvider?: 'firebase' | 'personal';
 }
@@ -64,6 +65,8 @@ export interface Transaction {
 export interface SecurityQuestionConfig {
   pinEnabled: boolean;
   hasPinSet: boolean;
+  pinLoginEnabled?: boolean;
+  hasPinLoginSet?: boolean;
   question1: string;
   hasQuestion1Set: boolean;
   question2?: string;

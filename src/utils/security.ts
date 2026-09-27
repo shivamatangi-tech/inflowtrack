@@ -26,6 +26,8 @@ const FAILED_ATTEMPTS_STORAGE_KEY = 'financeflow_failed_pin_attempts_v2';
 export const DEFAULT_SECURITY_CONFIG: SecurityQuestionConfig = {
   pinEnabled: false,
   hasPinSet: false,
+  pinLoginEnabled: false,
+  hasPinLoginSet: false,
   question1: 'What is your primary bank name or secret recovery keyword?',
   hasQuestion1Set: false,
   question2: '',
@@ -68,6 +70,8 @@ export function syncSecurityConfigMetadata(secConfig?: Partial<SecurityQuestionC
     const updated: SecurityQuestionConfig = {
       pinEnabled: secConfig.pinEnabled ?? current.pinEnabled ?? false,
       hasPinSet: secConfig.hasPinSet ?? current.hasPinSet ?? false,
+      pinLoginEnabled: secConfig.pinLoginEnabled ?? current.pinLoginEnabled ?? false,
+      hasPinLoginSet: secConfig.hasPinLoginSet ?? current.hasPinLoginSet ?? false,
       question1: secConfig.question1 || current.question1 || DEFAULT_SECURITY_CONFIG.question1,
       hasQuestion1Set: secConfig.hasQuestion1Set ?? current.hasQuestion1Set ?? false,
       question2: secConfig.question2 ?? current.question2 ?? '',
@@ -95,6 +99,8 @@ export function getSecurityQuestions(): SecurityQuestionConfig {
       return {
         pinEnabled: Boolean(parsed.pinEnabled),
         hasPinSet: Boolean(parsed.hasPinSet),
+        pinLoginEnabled: Boolean(parsed.pinLoginEnabled),
+        hasPinLoginSet: Boolean(parsed.hasPinLoginSet),
         question1: parsed.question1 || DEFAULT_SECURITY_CONFIG.question1,
         hasQuestion1Set: Boolean(parsed.hasQuestion1Set),
         question2: parsed.question2 || '',
@@ -108,6 +114,14 @@ export function getSecurityQuestions(): SecurityQuestionConfig {
     // Return default
   }
   return { ...DEFAULT_SECURITY_CONFIG };
+}
+
+/**
+ * Checks whether Easy PIN Login is configured and enabled for this user.
+ */
+export function hasPinLoginConfigured(): boolean {
+  const cfg = getSecurityQuestions();
+  return Boolean(cfg.pinLoginEnabled && cfg.hasPinLoginSet);
 }
 
 /**
@@ -231,6 +245,39 @@ export async function updateSecurityPinWithServer(
   });
   resetFailedAttempts();
   return { success: true };
+}
+
+/**
+ * Sets, updates, or disables Easy PIN Login in Firebase for the authenticated user.
+ */
+export async function setupPinLoginWithServer(
+  authToken: string,
+  options: { pin?: string; accountPassword?: string; enable: boolean }
+): Promise<{ success: boolean; pinLoginEnabled?: boolean; message?: string; error?: string }> {
+  const res = await fetch('/api/security/setup-pin-login', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${authToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(options),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return { success: false, error: data.error || 'Failed to update Easy PIN Login configuration.' };
+  }
+
+  syncSecurityConfigMetadata({
+    pinLoginEnabled: Boolean(data.pinLoginEnabled),
+    hasPinLoginSet: Boolean(data.hasPinLoginSet),
+  });
+
+  return {
+    success: true,
+    pinLoginEnabled: Boolean(data.pinLoginEnabled),
+    message: data.message || 'Easy PIN Login preferences updated successfully.',
+  };
 }
 
 /**

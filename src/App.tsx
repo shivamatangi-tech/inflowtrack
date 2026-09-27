@@ -499,7 +499,7 @@ export default function App() {
           i
         </div>
         <p className="text-xs font-medium text-[#78756E] dark:text-[#9C9990]">
-          Opening inflotrack workspace...
+          Opening inflowtrack...
         </p>
       </div>
     );
@@ -950,83 +950,18 @@ export default function App() {
         </div>
       </main>
 
-      {/* Professional Multi-Column Executive Footer (Responsive on all screens) */}
-      <footer className="bg-[#111110] text-[#F6F5F0] border-t border-[#262521] mt-8 pb-24 md:pb-0">
-        <div className="fluid-container py-10 sm:py-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 text-xs">
-          <div className="space-y-3">
-            <div className="font-display text-2xl font-semibold tracking-tight text-[#F6F5F0]">
-              inflotrack
-            </div>
-            <p className="text-[#9E9B92] leading-relaxed">
-              Sovereign personal wealth architecture, cash-flow intelligence, and private Google Sheets & Drive synchronization.
-            </p>
+      {/* Clean Inflowtrack Footer */}
+      <footer className="border-t border-[#E5E2DA] dark:border-[#262521] mt-8 py-6 pb-24 md:pb-6 text-center text-xs text-[#78756E] dark:text-[#9C9990]">
+        <div className="fluid-container flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-[#181816] dark:text-[#F4F3EF]">inflowtrack</span>
+            <span>—</span>
+            <span>Money In Out Tracker</span>
           </div>
-
-          <div className="space-y-2.5">
-            <h4 className="font-medium text-[#C5A059] tracking-wider uppercase text-[11px]">
-              Navigation
-            </h4>
-            <ul className="space-y-2 text-[#A39F95]">
-              <li>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveDesktopTab('dashboard');
-                    setActiveMobileTab('home');
-                  }}
-                  className="hover:text-[#F6F5F0] transition-colors cursor-pointer"
-                >
-                  Executive Cash-Flow Overview
-                </button>
-              </li>
-              <li>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveDesktopTab('goals');
-                    setActiveMobileTab('goals');
-                  }}
-                  className="hover:text-[#F6F5F0] transition-colors cursor-pointer"
-                >
-                  Cards, Vault & Capital Reserves
-                </button>
-              </li>
-              <li>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsDesktopSettingsOpen(true);
-                    setActiveMobileTab('settings');
-                  }}
-                  className="hover:text-[#F6F5F0] transition-colors cursor-pointer"
-                >
-                  Workspace & PIN Security
-                </button>
-              </li>
-            </ul>
-          </div>
-
-          <div className="space-y-2.5">
-            <h4 className="font-medium text-[#C5A059] tracking-wider uppercase text-[11px]">
-              Sovereign Storage
-            </h4>
-            <ul className="space-y-2 text-[#A39F95]">
-              <li>Google Sheets Live Ledger</li>
-              <li>Google Drive Workbook Backup</li>
-              <li>4-Digit PIN Reserve Protection</li>
-            </ul>
-          </div>
-
-          <div className="space-y-2.5">
-            <h4 className="font-medium text-[#C5A059] tracking-wider uppercase text-[11px]">
-              Client Office
-            </h4>
-            <p className="text-[#A39F95] truncate">
-              {currentUser.email || 'Authenticated Private Session'}
-            </p>
-            <p className="text-[#78746B] text-[11px]">
-              © {new Date().getFullYear()} inflotrack. All rights reserved.
-            </p>
+          <div className="flex items-center gap-4 text-[11px]">
+            <span>Synced with Google Sheets & Drive</span>
+            <span>•</span>
+            <span>© {new Date().getFullYear()} inflowtrack</span>
           </div>
         </div>
       </footer>

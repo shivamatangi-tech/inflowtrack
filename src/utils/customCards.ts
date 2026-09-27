@@ -22,6 +22,7 @@ export interface VaultCardItem {
   name: string;
   last4: string;
   prefix4: string;
+  middleDigits?: string;
   expiry: string;
   network: CardNetwork;
   tier: string;
@@ -30,12 +31,14 @@ export interface VaultCardItem {
 }
 
 const STORAGE_KEY = 'inflotrack_custom_cards_v1';
+const OVERRIDES_STORAGE_KEY = 'inflotrack_card_overrides_v1';
 
 export const DEFAULT_VAULT_CARDS: VaultCardItem[] = [
   {
     id: 'card-vault-primary',
     name: 'inflotrack Sovereign Vault',
     prefix4: '4532',
+    middleDigits: '8841 9200',
     last4: '6789',
     expiry: '09/29',
     network: 'VISA',
@@ -47,6 +50,7 @@ export const DEFAULT_VAULT_CARDS: VaultCardItem[] = [
     id: 'card-hdfc-cc',
     name: 'HDFC Credit Card',
     prefix4: '5412',
+    middleDigits: '7531 4092',
     last4: '3904',
     expiry: '11/28',
     network: 'Mastercard',
@@ -58,6 +62,7 @@ export const DEFAULT_VAULT_CARDS: VaultCardItem[] = [
     id: 'card-sbi-cc',
     name: 'SBI Credit Card',
     prefix4: '4111',
+    middleDigits: '6209 1845',
     last4: '8421',
     expiry: '06/28',
     network: 'VISA',
@@ -69,6 +74,7 @@ export const DEFAULT_VAULT_CARDS: VaultCardItem[] = [
     id: 'card-tata-neu',
     name: 'Tata Neu Credit Card',
     prefix4: '6521',
+    middleDigits: '9034 5112',
     last4: '7710',
     expiry: '03/29',
     network: 'RuPay',
@@ -80,6 +86,7 @@ export const DEFAULT_VAULT_CARDS: VaultCardItem[] = [
     id: 'card-amazon-icici',
     name: 'Amazon ICICI',
     prefix4: '4908',
+    middleDigits: '3410 8872',
     last4: '1156',
     expiry: '08/28',
     network: 'VISA',
@@ -101,9 +108,44 @@ export function getStoredCustomCards(): VaultCardItem[] {
   }
 }
 
+export function getCardOverrides(): Record<string, Partial<VaultCardItem>> {
+  try {
+    const raw = localStorage.getItem(OVERRIDES_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveCardOverrides(overrides: Record<string, Partial<VaultCardItem>>): void {
+  try {
+    localStorage.setItem(OVERRIDES_STORAGE_KEY, JSON.stringify(overrides));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 export function getAllVaultCards(): VaultCardItem[] {
+  const overrides = getCardOverrides();
   const custom = getStoredCustomCards();
-  return [...DEFAULT_VAULT_CARDS, ...custom];
+
+  const baseCards = DEFAULT_VAULT_CARDS.map((card) => {
+    if (overrides[card.id]) {
+      return { ...card, ...overrides[card.id] };
+    }
+    return card;
+  });
+
+  const customCards = custom.map((card) => {
+    if (overrides[card.id]) {
+      return { ...card, ...overrides[card.id] };
+    }
+    return card;
+  });
+
+  return [...baseCards, ...customCards];
 }
 
 export function addCustomVaultCard(
@@ -121,18 +163,45 @@ export function addCustomVaultCard(
   } catch {
     // Ignore storage quota errors
   }
-  return [...DEFAULT_VAULT_CARDS, ...updated];
+  return getAllVaultCards();
 }
 
-export function removeCustomVaultCard(id: string): VaultCardItem[] {
-  const existing = getStoredCustomCards();
-  const updated = existing.filter((c) => c.id !== id);
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-  } catch {
-    // Ignore storage errors
+/**
+ * Updates card details (name, last4, prefix4, expiry, network, tier, theme) without password.
+ * Changes are saved instantly to localStorage.
+ */
+export function updateVaultCard(
+  id: string,
+  updates: Partial<Omit<VaultCardItem, 'id'>>
+): VaultCardItem[] {
+  // If in custom cards, update stored item directly
+  const custom = getStoredCustomCards();
+  const customIndex = custom.findIndex((c) => c.id === id);
+  if (customIndex >= 0) {
+    const updatedCustom = [...custom];
+    updatedCustom[customIndex] = { ...updatedCustom[customIndex], ...updates };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedCustom));
+    } catch {
+      // Ignore storage errors
+    }
   }
-  return [...DEFAULT_VAULT_CARDS, ...updated];
+
+  // Also record in overrides so default cards and custom cards are smoothly preserved
+  const overrides = getCardOverrides();
+  overrides[id] = { ...(overrides[id] || {}), ...updates };
+  saveCardOverrides(overrides);
+
+  return getAllVaultCards();
+}
+
+/**
+ * Deletion is permanently disabled to ensure ledger consistency and transaction integrity.
+ * Returns the current list of cards without removing any card.
+ */
+export function removeCustomVaultCard(_id: string): VaultCardItem[] {
+  // Card details cannot be deleted per policy to protect financial consistency
+  return getAllVaultCards();
 }
 
 export function getCardThemeClasses(theme: CardThemeFinish): {

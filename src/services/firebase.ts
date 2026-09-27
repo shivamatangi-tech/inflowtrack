@@ -237,6 +237,73 @@ export async function loginWithEmailPassword(
 }
 
 /**
+ * Sign in using an Easy 4-digit PIN configured in Settings for this Firebase account.
+ */
+export async function loginWithPin(
+  email: string,
+  pin: string,
+  rememberMe = true
+): Promise<{ user: GoogleUser; token: string }> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail || !normalizedEmail.includes('@')) {
+    throw new Error('Please enter a valid email address.');
+  }
+  const cleanPin = pin.trim();
+  if (!cleanPin || cleanPin.length < 4) {
+    throw new Error('Please enter your 4-digit Easy Login PIN.');
+  }
+
+  const res = await fetch('/api/auth/pin-login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: normalizedEmail, pin: cleanPin, rememberMe }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'PIN sign-in failed. Please verify your PIN.');
+  }
+
+  const user: GoogleUser = {
+    uid: data.user.uid,
+    email: data.user.email,
+    displayName: data.user.displayName || normalizedEmail.split('@')[0],
+    photoURL: data.user.photoURL || null,
+    authProvider: data.user.authProvider || 'firebase',
+  };
+
+  cachedToken = data.token;
+  cachedUser = user;
+
+  try {
+    if (rememberMe) {
+      localStorage.setItem('inflowtrack_saved_email', normalizedEmail);
+      localStorage.setItem('inflowtrack_easy_pin_enabled', 'true');
+    }
+  } catch {
+    // Ignore storage issues
+  }
+
+  return { user, token: data.token };
+}
+
+/**
+ * Checks whether Easy PIN Login is configured for the given email address.
+ */
+export async function checkPinLoginStatus(email: string): Promise<boolean> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized || !normalized.includes('@')) return false;
+  try {
+    const res = await fetch(`/api/auth/check-pin-status?email=${encodeURIComponent(normalized)}`);
+    if (!res.ok) return false;
+    const data = await res.json();
+    return Boolean(data.pinLoginEnabled);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Send a password reset email via Firebase Authentication, or reset via security recovery if using fallback.
  */
 export async function requestPasswordReset(email: string): Promise<string> {

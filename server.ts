@@ -25,7 +25,8 @@
  * ============================================================================
  */
 
-import express, { Request, Response, NextFunction } from 'express';
+import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -209,6 +210,31 @@ function normalizeAnswerForHash(answer: string): string {
     .replace(/^['"]+|['"]+$/g, '');
 }
 
+export function encryptSecret(plainText: string): string {
+  const iv = crypto.randomBytes(12);
+  const key = crypto.createHash('sha256').update(SESSION_SECRET).digest();
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  let enc = cipher.update(plainText, 'utf8', 'hex');
+  enc += cipher.final('hex');
+  const tag = cipher.getAuthTag().toString('hex');
+  return `${iv.toString('hex')}:${tag}:${enc}`;
+}
+
+export function decryptSecret(encryptedPayload: string): string | null {
+  try {
+    const [ivHex, tagHex, encHex] = encryptedPayload.split(':');
+    if (!ivHex || !tagHex || !encHex) return null;
+    const key = crypto.createHash('sha256').update(SESSION_SECRET).digest();
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    let dec = decipher.update(encHex, 'hex', 'utf8');
+    dec += decipher.final('utf8');
+    return dec;
+  } catch {
+    return null;
+  }
+}
+
 // ============================================================================
 // SERVER-SIDE PERSONAL AUTH FALLBACK & JWT SIGNING
 // (Used seamlessly if Firebase Email/Password provider is not yet enabled in Console)
@@ -217,6 +243,7 @@ function normalizeAnswerForHash(answer: string): string {
 interface StoredAuthUser {
   uid: string;
   email: string;
+  username?: string;
   displayName: string;
   passwordHash: string;
   createdAt: string;
@@ -600,6 +627,9 @@ interface UserSecurityRecord {
   uid: string;
   pinEnabled: boolean;
   pinSaltedHash: string; // pbkdf2_sha256$100000$salt$hash (NEVER plaintext)
+  pinLoginEnabled?: boolean;
+  pinLoginEncryptedPassword?: string;
+  pinLoginEmail?: string;
   question1: string;
   answer1SaltedHash: string; // pbkdf2_sha256$100000$salt$hash (NEVER plaintext)
   question2: string;
@@ -828,6 +858,9 @@ function ensureUserRecords(wb: WorkbookStore, uid: string): void {
       uid,
       pinEnabled: false,
       pinSaltedHash: '',
+      pinLoginEnabled: false,
+      pinLoginEncryptedPassword: '',
+      pinLoginEmail: '',
       question1: 'What is your primary bank name or secret recovery keyword?',
       answer1SaltedHash: '',
       question2: '',
@@ -1769,12 +1802,17 @@ async function startServer() {
 
   app.post('/api/auth/register', (req: Request, res: Response) => {
     try {
-      const { email, password, displayName } = req.body || {};
-      const cleanEmail = String(email || '').trim().toLowerCase();
+      const { email, username, password, displayName } = req.body || {};
+      const cleanUsername = String(username || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      let cleanEmail = String(email || '').trim().toLowerCase();
       const cleanPass = String(password || '');
 
+      if (!cleanEmail && cleanUsername) {
+        cleanEmail = `${cleanUsername}@inflowtrack.app`;
+      }
+
       if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-        res.status(400).json({ error: 'Please enter a valid email address.' });
+        res.status(400).json({ error: 'Please enter a valid username or email address.' });
         return;
       }
       if (cleanPass.length < 6) {
@@ -1783,19 +1821,29 @@ async function startServer() {
       }
 
       const users = loadAuthUsers();
-      const existing = Object.values(users).find((u) => u.email.toLowerCase() === cleanEmail);
-      if (existing) {
-        res.status(409).json({ error: 'An account with this email already exists. Please sign in instead.' });
+      const existingEmail = Object.values(users).find((u) => u.email.toLowerCase() === cleanEmail);
+      if (existingEmail) {
+        res.status(409).json({ error: 'An account with this email/username already exists. Please sign in instead.' });
         return;
+      }
+      if (cleanUsername) {
+        const existingUsername = Object.values(users).find(
+          (u) => u.username && u.username.toLowerCase() === cleanUsername
+        );
+        if (existingUsername) {
+          res.status(409).json({ error: 'This username is already taken. Please choose another username.' });
+          return;
+        }
       }
 
       const uid = 'ff_uid_' + crypto.randomBytes(12).toString('hex');
       const now = new Date().toISOString();
-      const name = String(displayName || cleanEmail.split('@')[0]).trim();
+      const name = String(displayName || cleanUsername || cleanEmail.split('@')[0]).trim();
 
       users[uid] = {
         uid,
         email: cleanEmail,
+        username: cleanUsername || undefined,
         displayName: name,
         passwordHash: hashSecretPBKDF2(cleanPass, 100000),
         createdAt: now,
@@ -1810,7 +1858,14 @@ async function startServer() {
 
       const token = signServerToken({ uid, email: cleanEmail, displayName: name });
       res.status(201).json({
-        user: { uid, email: cleanEmail, displayName: name, photoURL: null, authProvider: 'personal' },
+        user: {
+          uid,
+          email: cleanEmail,
+          username: cleanUsername || name,
+          displayName: name,
+          photoURL: null,
+          authProvider: 'personal',
+        },
         token,
       });
     } catch {
@@ -1820,12 +1875,12 @@ async function startServer() {
 
   app.post('/api/auth/login', (req: Request, res: Response) => {
     try {
-      const { email, password } = req.body || {};
-      const cleanEmail = String(email || '').trim().toLowerCase();
+      const { email, identifier, username, password } = req.body || {};
+      const rawId = String(identifier || username || email || '').trim();
       const cleanPass = String(password || '');
 
-      if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-        res.status(400).json({ error: 'Please enter a valid email address.' });
+      if (!rawId) {
+        res.status(400).json({ error: 'Please enter your username or email address.' });
         return;
       }
       if (!cleanPass) {
@@ -1834,9 +1889,17 @@ async function startServer() {
       }
 
       const users = loadAuthUsers();
-      const user = Object.values(users).find((u) => u.email.toLowerCase() === cleanEmail);
+      const lowerId = rawId.toLowerCase();
+      const user = Object.values(users).find(
+        (u) =>
+          u.email.toLowerCase() === lowerId ||
+          (u.username && u.username.toLowerCase() === lowerId) ||
+          u.email.toLowerCase() === `${lowerId}@inflowtrack.app` ||
+          u.displayName.toLowerCase() === lowerId
+      );
+
       if (!user || !verifySecretPBKDF2(cleanPass, user.passwordHash)) {
-        res.status(401).json({ error: 'Incorrect email or password. Please check your credentials and try again.' });
+        res.status(401).json({ error: 'Incorrect username/email or password. Please check your credentials and try again.' });
         return;
       }
 
@@ -1850,6 +1913,7 @@ async function startServer() {
         user: {
           uid: user.uid,
           email: user.email,
+          username: user.username || user.displayName,
           displayName: user.displayName,
           photoURL: null,
           authProvider: 'personal',
@@ -1858,6 +1922,237 @@ async function startServer() {
       });
     } catch {
       res.status(500).json({ error: 'Unable to sign in right now. Please try again.' });
+    }
+  });
+
+  // Easy PIN Login Endpoint (Authenticates with Firebase or local user using encrypted credential linked to verified PIN)
+  app.post('/api/auth/pin-login', async (req: Request, res: Response) => {
+    try {
+      const { email, identifier, username, pin } = req.body || {};
+      const rawId = String(identifier || username || email || '').trim();
+      const cleanPin = String(pin || '').trim();
+
+      if (!rawId) {
+        res.status(400).json({ error: 'Please enter your username or email address.' });
+        return;
+      }
+      if (!cleanPin || cleanPin.length < 4) {
+        res.status(400).json({ error: 'Please enter your 4-digit Easy Login PIN.' });
+        return;
+      }
+
+      const users = loadAuthUsers();
+      const lowerId = rawId.toLowerCase();
+      const matchedUser = Object.values(users).find(
+        (u) =>
+          u.email.toLowerCase() === lowerId ||
+          (u.username && u.username.toLowerCase() === lowerId) ||
+          u.email.toLowerCase() === `${lowerId}@inflowtrack.app` ||
+          u.displayName.toLowerCase() === lowerId
+      );
+
+      const cleanEmail = matchedUser ? matchedUser.email : (lowerId.includes('@') ? lowerId : `${lowerId}@inflowtrack.app`);
+
+      const wb = loadWorkbook();
+      let matchingSec = Object.values(wb.userSecurity).find(
+        (s) =>
+          (s.pinLoginEmail && s.pinLoginEmail.toLowerCase() === cleanEmail) ||
+          (matchedUser && s.uid === matchedUser.uid)
+      );
+
+      if (!matchingSec && matchedUser && wb.userSecurity[matchedUser.uid]) {
+        matchingSec = wb.userSecurity[matchedUser.uid];
+      }
+
+      if (
+        !matchingSec ||
+        !matchingSec.pinLoginEnabled ||
+        !matchingSec.pinLoginEncryptedPassword ||
+        !matchingSec.pinSaltedHash
+      ) {
+        res.status(400).json({
+          error:
+            'Easy PIN Login is not configured for this account yet. Please sign in with your password first, then set up your Easy Login PIN in Settings.',
+          code: 'PIN_NOT_ENABLED',
+        });
+        return;
+      }
+
+      if ((matchingSec.failedAttempts || 0) >= 3) {
+        res.status(423).json({
+          error:
+            'PIN login is temporarily locked after 3 failed attempts. Please sign in with your account password to reset your PIN.',
+          lockedOut: true,
+          code: 'PIN_LOCKED_OUT',
+        });
+        return;
+      }
+
+      const isPinValid = verifySecretPBKDF2(cleanPin, matchingSec.pinSaltedHash);
+      if (!isPinValid) {
+        matchingSec.failedAttempts = (matchingSec.failedAttempts || 0) + 1;
+        saveWorkbook(wb);
+        const remaining = 3 - matchingSec.failedAttempts;
+        res.status(401).json({
+          error:
+            remaining > 0
+              ? `Incorrect PIN. (${remaining} attempt${remaining === 1 ? '' : 's'} remaining)`
+              : 'PIN login locked after 3 failed attempts. Please sign in with your account password.',
+          failedAttempts: matchingSec.failedAttempts,
+          lockedOut: matchingSec.failedAttempts >= 3,
+          code: 'INVALID_PIN',
+        });
+        return;
+      }
+
+      matchingSec.failedAttempts = 0;
+      saveWorkbook(wb);
+
+      const plainPassword = decryptSecret(matchingSec.pinLoginEncryptedPassword);
+      if (!plainPassword) {
+        res.status(500).json({
+          error: 'Unable to decrypt login credentials. Please sign in with your password.',
+        });
+        return;
+      }
+
+      const userDisplayName = matchedUser?.displayName || matchedUser?.username || cleanEmail.split('@')[0];
+      const userUsername = matchedUser?.username || userDisplayName;
+
+      // 1. Authenticate against Firebase Identity Toolkit if configured
+      if (FIREBASE_API_KEY && cleanEmail.includes('@') && !cleanEmail.endsWith('@inflowtrack.app')) {
+        try {
+          const fbRes = await fetch(
+            `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(FIREBASE_API_KEY)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: cleanEmail,
+                password: plainPassword,
+                returnSecureToken: true,
+              }),
+            }
+          );
+
+          if (fbRes.ok) {
+            const fbData = await fbRes.json();
+            const mappedName = fbData.displayName || userDisplayName;
+            res.json({
+              user: {
+                uid: fbData.localId,
+                email: cleanEmail,
+                username: userUsername,
+                displayName: mappedName,
+                photoURL: null,
+                authProvider: 'firebase',
+              },
+              token: fbData.idToken,
+              refreshToken: fbData.refreshToken,
+            });
+            return;
+          }
+        } catch {
+          // Fall through to server-signed token fallback
+        }
+      }
+
+      // 2. Server-side token fallback
+      const uid = matchingSec.uid || matchedUser?.uid || 'user-pin-auth';
+      const serverToken = signServerToken({ uid, email: cleanEmail, displayName: userDisplayName });
+
+      res.json({
+        user: {
+          uid,
+          email: cleanEmail,
+          username: userUsername,
+          displayName: userDisplayName,
+          photoURL: null,
+          authProvider: 'personal',
+        },
+        token: serverToken,
+      });
+    } catch {
+      res.status(500).json({ error: 'Unable to complete PIN login right now. Please try again.' });
+    }
+  });
+
+  // Resolve identifier (username or email)
+  app.get('/api/auth/resolve-identifier', (req: Request, res: Response) => {
+    try {
+      const raw = String(req.query.identifier || '').trim().toLowerCase();
+      if (!raw) {
+        res.status(400).json({ error: 'Identifier is required.' });
+        return;
+      }
+      const users = loadAuthUsers();
+      const user = Object.values(users).find(
+        (u) =>
+          u.email.toLowerCase() === raw ||
+          (u.username && u.username.toLowerCase() === raw) ||
+          u.email.toLowerCase() === `${raw}@inflowtrack.app` ||
+          u.displayName.toLowerCase() === raw
+      );
+      if (user) {
+        const wb = loadWorkbook();
+        const sec =
+          wb.userSecurity[user.uid] ||
+          Object.values(wb.userSecurity).find((s) => s.pinLoginEmail === user.email);
+        res.json({
+          found: true,
+          email: user.email,
+          username: user.username || user.displayName,
+          displayName: user.displayName,
+          pinLoginEnabled: Boolean(sec?.pinLoginEnabled && sec?.pinLoginEncryptedPassword),
+        });
+        return;
+      }
+      res.json({
+        found: false,
+        email: raw.includes('@') ? raw : `${raw}@inflowtrack.app`,
+        username: raw.replace(/[^a-z0-9_-]/g, ''),
+        pinLoginEnabled: false,
+      });
+    } catch {
+      res.status(500).json({ error: 'Failed to resolve identifier.' });
+    }
+  });
+
+  // Check whether an email has Easy PIN Login enabled
+  app.get('/api/auth/check-pin-status', (req: Request, res: Response) => {
+    try {
+      const email = String(req.query.email || '').trim().toLowerCase();
+      if (!email) {
+        res.json({ pinLoginEnabled: false });
+        return;
+      }
+
+      const wb = loadWorkbook();
+      let matchingSec = Object.values(wb.userSecurity).find(
+        (s) => s.pinLoginEmail && s.pinLoginEmail.toLowerCase() === email
+      );
+
+      if (!matchingSec) {
+        const users = loadAuthUsers();
+        const localUser = Object.values(users).find((u) => u.email.toLowerCase() === email);
+        if (localUser && wb.userSecurity[localUser.uid]) {
+          matchingSec = wb.userSecurity[localUser.uid];
+        }
+      }
+
+      const isEnabled = Boolean(
+        matchingSec &&
+          matchingSec.pinLoginEnabled &&
+          matchingSec.pinLoginEncryptedPassword &&
+          matchingSec.pinSaltedHash
+      );
+
+      res.json({
+        pinLoginEnabled: isEnabled,
+        email,
+      });
+    } catch {
+      res.json({ pinLoginEnabled: false });
     }
   });
 
@@ -2015,6 +2310,8 @@ async function startServer() {
           securityConfig: {
             pinEnabled: secRec.pinEnabled && Boolean(secRec.pinSaltedHash),
             hasPinSet: Boolean(secRec.pinSaltedHash),
+            pinLoginEnabled: Boolean(secRec.pinLoginEnabled && secRec.pinLoginEncryptedPassword),
+            hasPinLoginSet: Boolean(secRec.pinLoginEncryptedPassword && secRec.pinSaltedHash),
             question1: secRec.question1,
             hasQuestion1Set: Boolean(secRec.answer1SaltedHash),
             question2: secRec.question2,
@@ -2662,6 +2959,8 @@ async function startServer() {
     res.json({
       pinEnabled: sec.pinEnabled && Boolean(sec.pinSaltedHash),
       hasPinSet: Boolean(sec.pinSaltedHash),
+      pinLoginEnabled: Boolean(sec.pinLoginEnabled && sec.pinLoginEncryptedPassword),
+      hasPinLoginSet: Boolean(sec.pinLoginEncryptedPassword && sec.pinSaltedHash),
       question1: sec.question1,
       hasQuestion1Set: Boolean(sec.answer1SaltedHash),
       question2: sec.question2,
@@ -2774,6 +3073,111 @@ async function startServer() {
       });
     } catch {
       res.status(500).json({ error: 'Failed to update security PIN.' });
+    }
+  });
+
+  // Setup / Update / Disable Easy PIN Login in Firebase
+  app.post('/api/security/setup-pin-login', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const uid = req.user!.uid;
+      const userEmail = req.user!.email;
+      const { pin, accountPassword, enable } = req.body || {};
+
+      const wb = loadWorkbook();
+      ensureUserRecords(wb, uid);
+      const sec = wb.userSecurity[uid];
+
+      if (enable === false) {
+        sec.pinLoginEnabled = false;
+        sec.pinLoginEncryptedPassword = '';
+        sec.updatedAt = new Date().toISOString();
+        saveWorkbook(wb);
+        res.json({
+          success: true,
+          pinLoginEnabled: false,
+          hasPinLoginSet: false,
+          message: 'Easy PIN Login has been disabled for this account.',
+        });
+        return;
+      }
+
+      const cleanPin = String(pin || '').trim();
+      if (!/^\d{4,8}$/.test(cleanPin)) {
+        res.status(400).json({ error: 'PIN must be between 4 and 8 digits.' });
+        return;
+      }
+
+      const passwordStr = String(accountPassword || '').trim();
+      if (!passwordStr) {
+        res.status(400).json({
+          error: 'Your Firebase account password is required to securely authorize Easy PIN Login.',
+        });
+        return;
+      }
+
+      // Verify account password with Firebase Identity Toolkit
+      let verifiedWithFirebase = false;
+      if (FIREBASE_API_KEY) {
+        try {
+          const verifyRes = await fetch(
+            `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(FIREBASE_API_KEY)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: userEmail,
+                password: passwordStr,
+                returnSecureToken: true,
+              }),
+            }
+          );
+          if (verifyRes.ok) {
+            verifiedWithFirebase = true;
+          }
+        } catch {
+          // Fall through to local user check
+        }
+      }
+
+      if (!verifiedWithFirebase) {
+        const users = loadAuthUsers();
+        const localUser =
+          users[uid] ||
+          Object.values(users).find((u) => u.email.toLowerCase() === userEmail.toLowerCase());
+        if (localUser && verifySecretPBKDF2(passwordStr, localUser.passwordHash)) {
+          verifiedWithFirebase = true;
+        }
+      }
+
+      if (!verifiedWithFirebase) {
+        res.status(401).json({
+          error: 'Incorrect account password. Please enter your valid Firebase account password.',
+        });
+        return;
+      }
+
+      // Encrypt password securely using AES-256-GCM for PIN-based login
+      const encryptedPass = encryptSecret(passwordStr);
+      const pinHash = hashSecretPBKDF2(cleanPin, 100000);
+
+      sec.pinSaltedHash = pinHash;
+      sec.pinEnabled = true;
+      sec.pinLoginEnabled = true;
+      sec.pinLoginEncryptedPassword = encryptedPass;
+      sec.pinLoginEmail = userEmail.toLowerCase();
+      sec.failedAttempts = 0;
+      sec.updatedAt = new Date().toISOString();
+
+      saveWorkbook(wb);
+
+      res.json({
+        success: true,
+        pinLoginEnabled: true,
+        hasPinLoginSet: true,
+        message: 'Easy PIN Login has been successfully configured and stored in Firebase for your account!',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to setup Easy PIN Login.' });
     }
   });
 

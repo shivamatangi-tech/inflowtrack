@@ -71,8 +71,8 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
           <p className="text-[11px] font-medium tracking-[0.14em] uppercase text-[#8E7952] dark:text-[#C5A059]">
             Monthly Financial Position
           </p>
-          <h2 className="font-display text-2xl sm:text-3xl font-semibold text-[#141412] dark:text-[#F6F5F0] tracking-tight">
-            Executive Cash-Flow Summary
+          <h2 className="text-2xl sm:text-3xl font-bold text-[#141412] dark:text-[#F6F5F0] tracking-tight">
+            Monthly Cash-Flow Summary
           </h2>
         </div>
 
