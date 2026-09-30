@@ -703,6 +703,117 @@ interface UserDriveConfigRecord {
   updatedAt: string;
 }
 
+interface StoredVaultCard {
+  id: string;
+  name: string;
+  cardType?: 'Debit' | 'Credit';
+  last4: string;
+  prefix4: string;
+  middleDigits?: string;
+  expiry: string;
+  network: 'VISA' | 'Mastercard' | 'RuPay' | 'AMEX';
+  tier: string;
+  theme: 'obsidian' | 'champagne' | 'navy' | 'platinum' | 'espresso';
+  upiId?: string;
+  qrCodeData?: string;
+  cvv?: string;
+  isDefault?: boolean;
+  updatedAt?: string;
+}
+
+const DEFAULT_SERVER_VAULT_CARDS: StoredVaultCard[] = [
+  {
+    id: 'card-vault-primary',
+    name: 'inflotrack Sovereign Vault',
+    cardType: 'Debit',
+    prefix4: '4532',
+    middleDigits: '8841 9200',
+    last4: '6789',
+    expiry: '09/29',
+    network: 'VISA',
+    tier: 'Infinite',
+    theme: 'obsidian',
+    upiId: 'inflotrack.vault@okaxis',
+    cvv: '842',
+    isDefault: true,
+  },
+  {
+    id: 'card-hdfc-debit',
+    name: 'HDFC Salary Debit Card',
+    cardType: 'Debit',
+    prefix4: '4532',
+    middleDigits: '9120 4018',
+    last4: '4129',
+    expiry: '05/29',
+    network: 'VISA',
+    tier: 'Platinum',
+    theme: 'navy',
+    upiId: 'salary.hdfc@upi',
+    cvv: '319',
+    isDefault: true,
+  },
+  {
+    id: 'card-hdfc-cc',
+    name: 'HDFC Credit Card',
+    cardType: 'Credit',
+    prefix4: '5412',
+    middleDigits: '7531 4092',
+    last4: '3904',
+    expiry: '11/28',
+    network: 'Mastercard',
+    tier: 'Signature',
+    theme: 'champagne',
+    upiId: 'hdfc.rewards@hdfcbank',
+    cvv: '592',
+    isDefault: true,
+  },
+  {
+    id: 'card-sbi-cc',
+    name: 'SBI Credit Card',
+    cardType: 'Credit',
+    prefix4: '4111',
+    middleDigits: '6209 1845',
+    last4: '8421',
+    expiry: '06/28',
+    network: 'VISA',
+    tier: 'Platinum',
+    theme: 'navy',
+    upiId: 'sbi.card@okhdfcbank',
+    cvv: '108',
+    isDefault: true,
+  },
+  {
+    id: 'card-tata-neu',
+    name: 'Tata Neu Credit Card',
+    cardType: 'Credit',
+    prefix4: '6521',
+    middleDigits: '9034 5112',
+    last4: '7710',
+    expiry: '03/29',
+    network: 'RuPay',
+    tier: 'Select',
+    theme: 'espresso',
+    upiId: 'tataneu.rewards@icici',
+    cvv: '741',
+    isDefault: true,
+  },
+  {
+    id: 'card-amazon-icici',
+    name: 'Amazon ICICI',
+    cardType: 'Credit',
+    prefix4: '4908',
+    middleDigits: '3410 8872',
+    last4: '1156',
+    expiry: '08/28',
+    network: 'VISA',
+    tier: 'Platinum',
+    theme: 'platinum',
+    upiId: 'amazonpay.icici@apl',
+    cvv: '663',
+    isDefault: true,
+  },
+];
+
 interface WorkbookStore {
   spreadsheetId: string;
   spreadsheetName: string;
@@ -715,6 +826,7 @@ interface WorkbookStore {
   userDriveConfigs: Record<string, UserDriveConfigRecord>;
   recurringTemplates: StoredRecurringRecord[];
   driveBackups: StoredDriveBackup[];
+  userCards?: Record<string, StoredVaultCard[]>;
 }
 
 function parseDriveFolderIdFromInput(rawInput?: string): { folderId: string; folderUrl: string } {
@@ -808,6 +920,7 @@ function loadWorkbook(): WorkbookStore {
         userDriveConfigs: parsed.userDriveConfigs || {},
         recurringTemplates: Array.isArray(parsed.recurringTemplates) ? parsed.recurringTemplates : [],
         driveBackups: Array.isArray(parsed.driveBackups) ? parsed.driveBackups : [],
+        userCards: parsed.userCards || {},
       };
     }
   } catch {
@@ -824,6 +937,7 @@ function loadWorkbook(): WorkbookStore {
     userDriveConfigs: {},
     recurringTemplates: [],
     driveBackups: [],
+    userCards: {},
   };
 }
 
@@ -958,6 +1072,13 @@ function ensureUserRecords(wb: WorkbookStore, uid: string): void {
       },
     ];
     wb.recurringTemplates.push(...defaults);
+  }
+
+  if (!wb.userCards) {
+    wb.userCards = {};
+  }
+  if (!wb.userCards[uid] || wb.userCards[uid].length === 0) {
+    wb.userCards[uid] = JSON.parse(JSON.stringify(DEFAULT_SERVER_VAULT_CARDS));
   }
 }
 
@@ -1802,58 +1923,88 @@ async function startServer() {
 
   app.post('/api/auth/register', (req: Request, res: Response) => {
     try {
-      const { email, username, password, displayName } = req.body || {};
+      const { email, username, password, pin, displayName } = req.body || {};
       const cleanUsername = String(username || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-      let cleanEmail = String(email || '').trim().toLowerCase();
-      const cleanPass = String(password || '');
+      const cleanPin = String(pin || '').trim();
+      let cleanPass = String(password || '');
 
-      if (!cleanEmail && cleanUsername) {
-        cleanEmail = `${cleanUsername}@inflowtrack.app`;
-      }
-
-      if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-        res.status(400).json({ error: 'Please enter a valid username or email address.' });
+      if (!cleanUsername || cleanUsername.length < 3) {
+        res.status(400).json({ error: 'Username must be at least 3 characters long (letters, numbers, underscore, hyphen).' });
         return;
       }
-      if (cleanPass.length < 6) {
+
+      if (cleanPin && !/^\d{4,8}$/.test(cleanPin)) {
+        res.status(400).json({ error: 'PIN must be 4 to 8 numeric digits.' });
+        return;
+      }
+
+      if (!cleanPass && cleanPin) {
+        // Derive strong recovery password if user opted for instant username + PIN registration
+        cleanPass = 'Rec_' + crypto.randomBytes(12).toString('hex');
+      } else if (cleanPass && cleanPass.length < 6) {
         res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+        return;
+      } else if (!cleanPass && !cleanPin) {
+        res.status(400).json({ error: 'Please create a 4-digit PIN or password for your account.' });
         return;
       }
 
       const users = loadAuthUsers();
-      const existingEmail = Object.values(users).find((u) => u.email.toLowerCase() === cleanEmail);
-      if (existingEmail) {
-        res.status(409).json({ error: 'An account with this email/username already exists. Please sign in instead.' });
+      const existingUsername = Object.values(users).find(
+        (u) =>
+          (u.username && u.username.toLowerCase() === cleanUsername) ||
+          u.email.toLowerCase() === `${cleanUsername}@inflowtrack.app` ||
+          u.email.toLowerCase() === cleanUsername
+      );
+      if (existingUsername) {
+        res.status(409).json({ error: 'This username is already taken. Please choose another username.' });
         return;
       }
-      if (cleanUsername) {
-        const existingUsername = Object.values(users).find(
-          (u) => u.username && u.username.toLowerCase() === cleanUsername
-        );
-        if (existingUsername) {
-          res.status(409).json({ error: 'This username is already taken. Please choose another username.' });
-          return;
-        }
+
+      let cleanEmail = String(email || '').trim().toLowerCase();
+      if (!cleanEmail) {
+        cleanEmail = `${cleanUsername}@inflowtrack.app`;
+      }
+
+      const existingEmail = Object.values(users).find((u) => u.email.toLowerCase() === cleanEmail);
+      if (existingEmail) {
+        res.status(409).json({ error: 'An account with this username/email already exists. Please sign in instead.' });
+        return;
       }
 
       const uid = 'ff_uid_' + crypto.randomBytes(12).toString('hex');
       const now = new Date().toISOString();
-      const name = String(displayName || cleanUsername || cleanEmail.split('@')[0]).trim();
+      const name = String(displayName || cleanUsername).trim();
+
+      // Cryptographically salted PBKDF2 hash (100,000 iterations). NEVER plaintext!
+      const passwordHash = hashSecretPBKDF2(cleanPass, 100000);
 
       users[uid] = {
         uid,
         email: cleanEmail,
-        username: cleanUsername || undefined,
+        username: cleanUsername,
         displayName: name,
-        passwordHash: hashSecretPBKDF2(cleanPass, 100000),
+        passwordHash,
         createdAt: now,
         updatedAt: now,
       };
       saveAuthUsers(users);
 
-      // Initialize user workbook space
+      // Initialize user workbook space with salted PBKDF2 PIN hash and default vault cards
       const wb = loadWorkbook();
       ensureUserRecords(wb, uid);
+
+      if (cleanPin) {
+        wb.userSecurity[uid].pinEnabled = true;
+        wb.userSecurity[uid].pinSaltedHash = hashSecretPBKDF2(cleanPin, 100000);
+        wb.userSecurity[uid].pinLoginEnabled = true;
+        wb.userSecurity[uid].pinLoginEncryptedPassword = encryptSecret(cleanPass);
+        wb.userSecurity[uid].pinLoginEmail = cleanEmail;
+        wb.userSecurity[uid].username = cleanUsername;
+        wb.userSecurity[uid].failedAttempts = 0;
+        wb.userSecurity[uid].updatedAt = now;
+      }
+
       saveWorkbook(wb);
 
       const token = signServerToken({ uid, email: cleanEmail, displayName: name });
@@ -1861,7 +2012,7 @@ async function startServer() {
         user: {
           uid,
           email: cleanEmail,
-          username: cleanUsername || name,
+          username: cleanUsername,
           displayName: name,
           photoURL: null,
           authProvider: 'personal',
@@ -1875,16 +2026,17 @@ async function startServer() {
 
   app.post('/api/auth/login', (req: Request, res: Response) => {
     try {
-      const { email, identifier, username, password } = req.body || {};
-      const rawId = String(identifier || username || email || '').trim();
+      const { email, identifier, username, password, pin } = req.body || {};
+      const rawId = String(username || identifier || email || '').trim();
+      const cleanPin = String(pin || '').trim();
       const cleanPass = String(password || '');
 
       if (!rawId) {
-        res.status(400).json({ error: 'Please enter your username or email address.' });
+        res.status(400).json({ error: 'Please enter your username.' });
         return;
       }
-      if (!cleanPass) {
-        res.status(400).json({ error: 'Please enter your password.' });
+      if (!cleanPin && !cleanPass) {
+        res.status(400).json({ error: 'Please enter your PIN or password.' });
         return;
       }
 
@@ -1892,15 +2044,62 @@ async function startServer() {
       const lowerId = rawId.toLowerCase();
       const user = Object.values(users).find(
         (u) =>
-          u.email.toLowerCase() === lowerId ||
           (u.username && u.username.toLowerCase() === lowerId) ||
+          u.email.toLowerCase() === lowerId ||
           u.email.toLowerCase() === `${lowerId}@inflowtrack.app` ||
           u.displayName.toLowerCase() === lowerId
       );
 
-      if (!user || !verifySecretPBKDF2(cleanPass, user.passwordHash)) {
-        res.status(401).json({ error: 'Incorrect username/email or password. Please check your credentials and try again.' });
+      if (!user) {
+        res.status(401).json({ error: 'No account found with this username. Please check your username or register.' });
         return;
+      }
+
+      const wb = loadWorkbook();
+      ensureUserRecords(wb, user.uid);
+      const sec = wb.userSecurity[user.uid];
+
+      // 1. PIN-based login verification against salted PBKDF2 hash
+      if (cleanPin) {
+        if (!sec || !sec.pinSaltedHash) {
+          res.status(400).json({
+            error: 'PIN login is not set up for this account yet. Please sign in with your password or set your PIN in Settings.',
+          });
+          return;
+        }
+
+        if ((sec.failedAttempts || 0) >= 3) {
+          res.status(423).json({
+            error: 'PIN login is locked after 3 failed attempts. Please sign in with your password to reset.',
+            lockedOut: true,
+          });
+          return;
+        }
+
+        const isPinValid = verifySecretPBKDF2(cleanPin, sec.pinSaltedHash);
+        if (!isPinValid) {
+          sec.failedAttempts = (sec.failedAttempts || 0) + 1;
+          saveWorkbook(wb);
+          const remaining = 3 - sec.failedAttempts;
+          res.status(401).json({
+            error:
+              remaining > 0
+                ? `Incorrect PIN. (${remaining} attempt${remaining === 1 ? '' : 's'} remaining)`
+                : 'PIN login locked after 3 failed attempts. Please sign in with your password.',
+            failedAttempts: sec.failedAttempts,
+            lockedOut: sec.failedAttempts >= 3,
+          });
+          return;
+        }
+
+        sec.failedAttempts = 0;
+        saveWorkbook(wb);
+      } else {
+        // 2. Password-based login verification against salted PBKDF2 hash
+        if (!verifySecretPBKDF2(cleanPass, user.passwordHash)) {
+          res.status(401).json({ error: 'Incorrect password. Please verify your credentials and try again.' });
+          return;
+        }
       }
 
       const token = signServerToken({
@@ -1922,6 +2121,26 @@ async function startServer() {
       });
     } catch {
       res.status(500).json({ error: 'Unable to sign in right now. Please try again.' });
+    }
+  });
+
+  app.get('/api/auth/check-username', (req: Request, res: Response) => {
+    try {
+      const username = String(req.query.username || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      if (!username || username.length < 3) {
+        res.json({ available: false, error: 'Username must be at least 3 characters long.' });
+        return;
+      }
+      const users = loadAuthUsers();
+      const exists = Object.values(users).some(
+        (u) =>
+          (u.username && u.username.toLowerCase() === username) ||
+          u.email.toLowerCase() === `${username}@inflowtrack.app` ||
+          u.email.toLowerCase() === username
+      );
+      res.json({ available: !exists, username });
+    } catch {
+      res.status(500).json({ error: 'Failed to verify username availability.' });
     }
   });
 
@@ -2223,6 +2442,113 @@ async function startServer() {
         photoURL: null,
       },
     });
+  });
+
+  // --------------------------------------------------------------------------
+  // 1.5. SECURE VAULT CARDS ENDPOINTS (CARDS, UPI IDs & QR CODES STORED IN DB)
+  // --------------------------------------------------------------------------
+
+  app.get('/api/cards', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const uid = req.user!.uid;
+      const wb = loadWorkbook();
+      ensureUserRecords(wb, uid);
+      res.json({ cards: wb.userCards?.[uid] || [] });
+    } catch {
+      res.status(500).json({ error: 'Failed to retrieve vault cards.' });
+    }
+  });
+
+  app.post('/api/cards', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const uid = req.user!.uid;
+      const wb = loadWorkbook();
+      ensureUserRecords(wb, uid);
+
+      const card = req.body?.card;
+      if (!card || !card.name) {
+        res.status(400).json({ error: 'Card data and card name are required.' });
+        return;
+      }
+
+      const existingCards = wb.userCards?.[uid] || [];
+      const cardId = card.id || `card-${Date.now()}`;
+      const now = new Date().toISOString();
+
+      const sanitizedCard: StoredVaultCard = {
+        id: cardId,
+        name: String(card.name || '').trim(),
+        cardType: card.cardType === 'Credit' ? 'Credit' : 'Debit',
+        last4: String(card.last4 || '1234').replace(/\D/g, '').slice(-4).padStart(4, '0'),
+        prefix4: String(card.prefix4 || '4532').replace(/\D/g, '').slice(0, 4).padEnd(4, '4'),
+        middleDigits: String(card.middleDigits || '8841 9200').trim(),
+        expiry: String(card.expiry || '12/29').trim(),
+        network: ['VISA', 'Mastercard', 'RuPay', 'AMEX'].includes(card.network) ? card.network : 'VISA',
+        tier: String(card.tier || 'Signature').trim(),
+        theme: ['obsidian', 'champagne', 'navy', 'platinum', 'espresso'].includes(card.theme) ? card.theme : 'obsidian',
+        upiId: String(card.upiId || '').trim(),
+        qrCodeData: String(card.qrCodeData || '').trim(),
+        cvv: String(card.cvv || '842').replace(/\D/g, '').slice(0, 4),
+        isDefault: Boolean(card.isDefault),
+        updatedAt: now,
+      };
+
+      const existingIndex = existingCards.findIndex((c) => c.id === cardId);
+      if (existingIndex >= 0) {
+        existingCards[existingIndex] = sanitizedCard;
+      } else {
+        existingCards.push(sanitizedCard);
+      }
+
+      if (!wb.userCards) wb.userCards = {};
+      wb.userCards[uid] = existingCards;
+      saveWorkbook(wb);
+
+      res.json({ success: true, card: sanitizedCard, cards: existingCards });
+    } catch {
+      res.status(500).json({ error: 'Failed to save card details.' });
+    }
+  });
+
+  app.put('/api/cards', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const uid = req.user!.uid;
+      const wb = loadWorkbook();
+      ensureUserRecords(wb, uid);
+
+      const cards = req.body?.cards;
+      if (!Array.isArray(cards)) {
+        res.status(400).json({ error: 'Cards array is required.' });
+        return;
+      }
+
+      if (!wb.userCards) wb.userCards = {};
+      wb.userCards[uid] = cards;
+      saveWorkbook(wb);
+
+      res.json({ success: true, cards });
+    } catch {
+      res.status(500).json({ error: 'Failed to update cards.' });
+    }
+  });
+
+  app.delete('/api/cards/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const uid = req.user!.uid;
+      const { id } = req.params;
+      const wb = loadWorkbook();
+      ensureUserRecords(wb, uid);
+
+      const existingCards = wb.userCards?.[uid] || [];
+      const updated = existingCards.filter((c) => c.id !== id);
+      if (!wb.userCards) wb.userCards = {};
+      wb.userCards[uid] = updated;
+      saveWorkbook(wb);
+
+      res.json({ success: true, message: 'Card removed successfully from database.', cards: updated });
+    } catch {
+      res.status(500).json({ error: 'Failed to delete card.' });
+    }
   });
 
   // --------------------------------------------------------------------------
@@ -3472,7 +3798,7 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, allowedHosts: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);

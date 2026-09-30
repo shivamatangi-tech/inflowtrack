@@ -17,7 +17,7 @@
  * ============================================================================
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   PiggyBank,
   ShieldCheck,
@@ -36,19 +36,19 @@ import {
   Sparkles,
   Wifi,
   CreditCard,
-  ArrowDown,
-  ArrowUp,
   X,
   Edit3,
   Check,
-  LockOpen,
   Lock,
   Unlock,
   KeyRound,
-  ShieldAlert,
   Eye,
   EyeOff,
   Loader2,
+  QrCode,
+  Copy,
+  RotateCw,
+  Wallet,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -79,15 +79,21 @@ import {
   calculateCombinedCapitalPreservedProgress,
 } from '../utils/targets';
 import { ConfirmationDialog } from './ConfirmationDialog';
-import { TopUpWithdrawIconBadge } from '../utils/categoryIcons';
+import { UpiQrCodeSvg } from './UpiQrCodeSvg';
 import {
   getAllVaultCards,
   addCustomVaultCard,
   updateVaultCard,
+  removeCustomVaultCard,
+  saveCardToServer,
+  deleteCardFromServer,
+  fetchServerCards,
   getCardThemeClasses,
+  getCardType,
   VaultCardItem,
   CardThemeFinish,
   CardNetwork,
+  CardType,
 } from '../utils/customCards';
 import {
   hasSecurityPinSet,
@@ -105,6 +111,8 @@ interface GoalsViewProps {
   onDeleteTransactionsBatch?: (rowIndices: number[]) => Promise<void>;
   sheetUrl?: string;
   isUnlocked?: boolean;
+  onUnlockSuccess?: () => void;
+  onLock?: () => void;
 }
 
 export const GoalsView: React.FC<GoalsViewProps> = ({
@@ -115,6 +123,8 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
   onDeleteTransaction,
   onDeleteTransactionsBatch,
   isUnlocked = false,
+  onUnlockSuccess,
+  onLock,
 }) => {
   // Timeframe state: 'month' | 'year' | 'alltime'
   const [timeframe, setTimeframe] = useState<GoalsTimeframe>('alltime');
@@ -160,9 +170,25 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
     );
   }, [goalsStats.savings, goalsStats.emergencyFund, savingsTargetVal, emergencyTargetVal]);
 
+  // Global / local PIN Unlock state
+  const [isCardUnlocked, setIsCardUnlocked] = useState<boolean>(Boolean(isUnlocked));
+
+  useEffect(() => {
+    setIsCardUnlocked(Boolean(isUnlocked));
+  }, [isUnlocked]);
+
+  const isContentUnlocked = Boolean(isUnlocked || isCardUnlocked);
+
   // Helper for masking amounts when locked
   const displayAmount = (amount: number): string => {
-    if (isUnlocked) {
+    if (isContentUnlocked) {
+      return formatINR(amount);
+    }
+    return '••••••';
+  };
+
+  const displayTarget = (amount: number): string => {
+    if (isContentUnlocked) {
       return formatINR(amount);
     }
     return '••••••';
@@ -276,64 +302,64 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
     setSelectedYear((prev) => String(parseInt(prev, 10) + 1));
   };
 
-  // Get type visual badge styling
+  // Get type visual badge styling matching website's elegant luxury color palette
   const getTypeStyle = (tx: Transaction) => {
     switch (tx.type) {
       case 'Savings':
         return {
           label: 'Savings',
-          textColor: 'text-blue-600 dark:text-blue-400',
+          textColor: 'text-[#8E7952] dark:text-[#C5A059]',
           badgeBg:
-            'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800',
+            'bg-[#C5A059]/10 text-[#8E7952] dark:text-[#C5A059] border-[#C5A059]/30',
           icon: <PiggyBank className="w-3.5 h-3.5" />,
         };
       case 'Emergency Fund':
         return {
           label: 'Emergency Fund',
-          textColor: 'text-amber-600 dark:text-amber-400',
+          textColor: 'text-[#141412] dark:text-[#F6F5F0]',
           badgeBg:
-            'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+            'bg-[#F6F5F0] dark:bg-[#22211D] text-[#141412] dark:text-[#F6F5F0] border-[#E5E0D4] dark:border-[#2C2A25]',
           icon: <ShieldCheck className="w-3.5 h-3.5" />,
         };
       case 'Lent':
         return {
           label: 'Lent',
-          textColor: 'text-purple-600 dark:text-purple-400',
+          textColor: 'text-[#2E6F40] dark:text-emerald-400',
           badgeBg:
-            'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800',
+            'bg-emerald-500/10 text-[#2E6F40] dark:text-emerald-400 border-emerald-500/25',
           icon: <ArrowUpRight className="w-3.5 h-3.5" />,
         };
       case 'Borrowed':
         return {
           label: 'Borrowed',
-          textColor: 'text-rose-600 dark:text-rose-400',
+          textColor: 'text-[#8E7952] dark:text-[#C5A059]',
           badgeBg:
-            'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800',
+            'bg-[#F6F5F0] dark:bg-[#22211D] text-[#8E7952] dark:text-[#C5A059] border-[#E5E0D4] dark:border-[#2C2A25]',
           icon: <ArrowDownLeft className="w-3.5 h-3.5" />,
         };
       case 'Lent & Borrowed':
         if (isBorrowedTransaction(tx)) {
           return {
             label: 'Borrowed',
-            textColor: 'text-rose-600 dark:text-rose-400',
+            textColor: 'text-[#8E7952] dark:text-[#C5A059]',
             badgeBg:
-              'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800',
+              'bg-[#F6F5F0] dark:bg-[#22211D] text-[#8E7952] dark:text-[#C5A059] border-[#E5E0D4] dark:border-[#2C2A25]',
             icon: <ArrowDownLeft className="w-3.5 h-3.5" />,
           };
         }
         return {
           label: 'Lent',
-          textColor: 'text-purple-600 dark:text-purple-400',
+          textColor: 'text-[#2E6F40] dark:text-emerald-400',
           badgeBg:
-            'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800',
+            'bg-emerald-500/10 text-[#2E6F40] dark:text-emerald-400 border-emerald-500/25',
           icon: <ArrowUpRight className="w-3.5 h-3.5" />,
         };
       default:
         return {
           label: tx.type,
-          textColor: 'text-slate-700 dark:text-slate-300',
+          textColor: 'text-[#141412] dark:text-[#F6F5F0]',
           badgeBg:
-            'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700',
+            'bg-[#F6F5F0] dark:bg-[#22211D] text-[#141412] dark:text-[#F6F5F0] border-[#E5E0D4] dark:border-[#2C2A25]',
           icon: null,
         };
     }
@@ -377,16 +403,16 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
   const [activeCardIndex, setActiveCardIndex] = useState<number>(0);
   const [swipeDirection, setSwipeDirection] = useState<number>(1);
   const [isAddCardOpen, setIsAddCardOpen] = useState<boolean>(false);
+  const [isCardFlipped, setIsCardFlipped] = useState<boolean>(false);
+  const [copiedUpi, setCopiedUpi] = useState<boolean>(false);
+  const [cardFilterType, setCardFilterType] = useState<'ALL' | 'Debit' | 'Credit'>('ALL');
 
-  // Card details lock/unlock state (requires PIN to reveal full details and edit)
-  const [isCardUnlocked, setIsCardUnlocked] = useState<boolean>(Boolean(isUnlocked));
-
-  // Sync with global isUnlocked prop if parent unlocks
-  React.useEffect(() => {
-    if (isUnlocked) {
-      setIsCardUnlocked(true);
-    }
-  }, [isUnlocked]);
+  const handleCopyUpi = (upiId: string) => {
+    if (!upiId) return;
+    navigator.clipboard?.writeText(upiId).catch(() => {});
+    setCopiedUpi(true);
+    setTimeout(() => setCopiedUpi(false), 2000);
+  };
 
   // PIN Authorization Modal state for editing & unlocking cards
   const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
@@ -400,17 +426,20 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
 
   // Add New Card Form state
   const [newCardName, setNewCardName] = useState('');
+  const [newCardType, setNewCardType] = useState<CardType>('Debit');
   const [newCardLast4, setNewCardLast4] = useState('');
   const [newCardExpiry, setNewCardExpiry] = useState('12/29');
   const [newCardNetwork, setNewCardNetwork] = useState<CardNetwork>('VISA');
   const [newCardTier, setNewCardTier] = useState('Signature');
   const [newCardTheme, setNewCardTheme] = useState<CardThemeFinish>('obsidian');
+  const [newCardUpi, setNewCardUpi] = useState('');
   const [addCardError, setAddCardError] = useState<string | null>(null);
 
-  // Edit Card Form state (PIN verified first; deletion permanently disallowed)
+  // Edit Card Form state (PIN verified first; allows editing details, UPI ID, QR code, and deletion)
   const [isEditCardOpen, setIsEditCardOpen] = useState<boolean>(false);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [editCardName, setEditCardName] = useState('');
+  const [editCardType, setEditCardType] = useState<CardType>('Debit');
   const [editCardPrefix4, setEditCardPrefix4] = useState('4532');
   const [editCardMiddleDigits, setEditCardMiddleDigits] = useState('8841 9200');
   const [editCardLast4, setEditCardLast4] = useState('');
@@ -418,8 +447,13 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
   const [editCardNetwork, setEditCardNetwork] = useState<CardNetwork>('VISA');
   const [editCardTier, setEditCardTier] = useState('Signature');
   const [editCardTheme, setEditCardTheme] = useState<CardThemeFinish>('obsidian');
+  const [editCardUpi, setEditCardUpi] = useState('');
+  const [editCardQrCodeData, setEditCardQrCodeData] = useState('');
+  const [editCardCvv, setEditCardCvv] = useState('842');
   const [editCardError, setEditCardError] = useState<string | null>(null);
   const [editCardSuccess, setEditCardSuccess] = useState<string | null>(null);
+  const [isDeleteCardConfirmOpen, setIsDeleteCardConfirmOpen] = useState<boolean>(false);
+  const [isSavingCard, setIsSavingCard] = useState<boolean>(false);
 
   const totalCards = vaultCards.length;
   const safeActiveIndex = totalCards > 0 ? ((activeCardIndex % totalCards) + totalCards) % totalCards : 0;
@@ -448,27 +482,27 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
   };
 
   /**
-   * Request to edit card details: requires entering PIN if currently locked.
+   * Request to edit card details: requires entering PIN before allowing any changes.
    */
-  const handleRequestEditCard = (card: VaultCardItem) => {
-    if (!isCardUnlocked) {
-      setPendingCardToEdit(card);
-      setPinInput('');
-      setNewPinConfirm('');
-      setPinError(null);
-      setIsSettingUpPin(!hasSecurityPinSet());
-      setIsPinModalOpen(true);
-      return;
-    }
-    handleOpenEditCard(card);
+  const handleRequestEditCard = (card?: VaultCardItem) => {
+    const target = card || activeCard;
+    setPendingCardToEdit(target);
+    setPinInput('');
+    setNewPinConfirm('');
+    setPinError(null);
+    setIsSettingUpPin(!hasSecurityPinSet());
+    setIsPinModalOpen(true);
   };
 
   /**
    * Request to toggle lock / unlock without immediately editing.
    */
   const handleRequestUnlockOnly = () => {
-    if (isCardUnlocked) {
+    if (isContentUnlocked) {
       setIsCardUnlocked(false);
+      if (onLock) {
+        onLock();
+      }
       return;
     }
     setPendingCardToEdit(null);
@@ -524,13 +558,16 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
 
       // PIN Verified Successfully! Full card details are unlocked
       setIsCardUnlocked(true);
+      if (onUnlockSuccess) {
+        onUnlockSuccess();
+      }
       setIsPinModalOpen(false);
-      const targetCard = pendingCardToEdit;
+      const targetCard = pendingCardToEdit || activeCard;
       setPendingCardToEdit(null);
       setPinInput('');
       setNewPinConfirm('');
 
-      // If user requested to edit a card, open edit card modal
+      // If user requested to edit card, open edit card modal
       if (targetCard) {
         handleOpenEditCard(targetCard);
       }
@@ -544,6 +581,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
   const handleOpenEditCard = (card: VaultCardItem) => {
     setEditingCardId(card.id);
     setEditCardName(card.name);
+    setEditCardType(card.cardType || getCardType(card));
     setEditCardPrefix4(card.prefix4 || '4532');
     setEditCardMiddleDigits(card.middleDigits || '8841 9200');
     setEditCardLast4(card.last4 || '6789');
@@ -551,12 +589,16 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
     setEditCardNetwork(card.network || 'VISA');
     setEditCardTier(card.tier || 'Signature');
     setEditCardTheme(card.theme || 'obsidian');
+    setEditCardUpi(card.upiId || '');
+    setEditCardQrCodeData(card.qrCodeData || '');
+    setEditCardCvv(card.cvv || '842');
     setEditCardError(null);
     setEditCardSuccess(null);
+    setIsDeleteCardConfirmOpen(false);
     setIsEditCardOpen(true);
   };
 
-  const handleSaveEditCard = (e: React.FormEvent) => {
+  const handleSaveEditCard = async (e: React.FormEvent) => {
     e.preventDefault();
     setEditCardError(null);
 
@@ -568,28 +610,70 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
       return;
     }
 
-    const cleanLast4 = editCardLast4.replace(/\D/g, '').slice(-4).padStart(4, '8');
+    const cleanLast4 = editCardLast4.replace(/\D/g, '').slice(-4).padStart(4, '0');
     const cleanPrefix4 = editCardPrefix4.replace(/\D/g, '').slice(0, 4).padEnd(4, '4');
     const cleanMiddle = editCardMiddleDigits.trim() || '8841 9200';
     const cleanExpiry = editCardExpiry.trim() || '12/29';
+    const cleanUpi = editCardUpi.trim();
+    const cleanQr = editCardQrCodeData.trim();
+    const cleanCvv = editCardCvv.replace(/\D/g, '').slice(0, 4) || '842';
 
-    const updated = updateVaultCard(editingCardId, {
-      name: cleanName,
-      last4: cleanLast4,
-      prefix4: cleanPrefix4,
-      middleDigits: cleanMiddle,
-      expiry: cleanExpiry,
-      network: editCardNetwork,
-      tier: editCardTier.trim() || 'Standard',
-      theme: editCardTheme,
-    });
+    setIsSavingCard(true);
+    try {
+      const updatedCard: VaultCardItem = {
+        id: editingCardId,
+        name: cleanName,
+        cardType: editCardType,
+        last4: cleanLast4,
+        prefix4: cleanPrefix4,
+        middleDigits: cleanMiddle,
+        expiry: cleanExpiry,
+        network: editCardNetwork,
+        tier: editCardTier.trim() || 'Standard',
+        theme: editCardTheme,
+        upiId: cleanUpi,
+        qrCodeData: cleanQr,
+        cvv: cleanCvv,
+      };
 
-    setVaultCards(updated);
-    setEditCardSuccess('Card details updated successfully!');
-    setTimeout(() => {
-      setIsEditCardOpen(false);
-      setEditCardSuccess(null);
-    }, 600);
+      const token = await getFreshAuthToken();
+      const updatedList = await saveCardToServer(updatedCard, token || undefined);
+      setVaultCards(updatedList);
+      setEditCardSuccess('Card details, UPI ID, and QR code saved securely to database!');
+      setTimeout(() => {
+        setIsEditCardOpen(false);
+        setEditCardSuccess(null);
+      }, 750);
+    } catch (err: any) {
+      setEditCardError(err.message || 'Failed to save card changes.');
+    } finally {
+      setIsSavingCard(false);
+    }
+  };
+
+  const handleDeleteCard = async () => {
+    if (!editingCardId) return;
+    setIsSavingCard(true);
+    try {
+      const token = await getFreshAuthToken();
+      const updatedList = await deleteCardFromServer(editingCardId, token || undefined);
+      setVaultCards(updatedList);
+      setIsDeleteCardConfirmOpen(false);
+      setEditCardSuccess('Card deleted successfully from vault database.');
+      setTimeout(() => {
+        if (updatedList.length > 0) {
+          handleOpenEditCard(updatedList[0]);
+          setEditCardSuccess(null);
+        } else {
+          setIsEditCardOpen(false);
+          setEditCardSuccess(null);
+        }
+      }, 700);
+    } catch (err: any) {
+      setEditCardError(err.message || 'Failed to delete card.');
+    } finally {
+      setIsSavingCard(false);
+    }
   };
 
   const handleAddCardSubmit = (e: React.FormEvent) => {
@@ -613,12 +697,15 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
 
     const updated = addCustomVaultCard({
       name: cleanName,
+      cardType: newCardType,
       last4: cleanLast4,
       prefix4: prefixMap[newCardNetwork] || '4532',
       expiry: cleanExpiry,
       network: newCardNetwork,
       tier: newCardTier.trim() || 'Platinum',
       theme: newCardTheme,
+      upiId: newCardUpi.trim() || `${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '')}@upi`,
+      cvv: '842',
     });
 
     setVaultCards(updated);
@@ -630,67 +717,18 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
     setIsAddCardOpen(false);
   };
 
-  // Compute activity breakdown by Payment Card / Mode (including user's custom cards)
-  const cardPaymentSummary = useMemo(() => {
-    const map = new Map<string, { spent: number; inflow: number; count: number }>();
-    vaultCards.forEach((c) => {
-      if (c.id !== 'card-vault-primary') {
-        map.set(c.name, { spent: 0, inflow: 0, count: 0 });
-      }
-    });
-    ['HDFC Bank', 'UPI / GPay'].forEach((c) => {
-      if (!map.has(c)) map.set(c, { spent: 0, inflow: 0, count: 0 });
-    });
+  // Separate Debit Cards and Credit Cards for distinct sections in the selector
+  const debitCardsList = useMemo(() => {
+    return vaultCards
+      .map((c, idx) => ({ card: c, indexInVault: idx }))
+      .filter(({ card }) => getCardType(card) === 'Debit');
+  }, [vaultCards]);
 
-    transactions.forEach((tx) => {
-      const mode = (tx.paymentMode || tx.account || 'HDFC Bank').trim();
-      const entry = map.get(mode) || { spent: 0, inflow: 0, count: 0 };
-      if (tx.type === 'Income') {
-        entry.inflow += tx.amount;
-      } else if (tx.type === 'Expense') {
-        entry.spent += tx.amount;
-      }
-      entry.count += 1;
-      map.set(mode, entry);
-    });
-
-    return Array.from(map.entries())
-      .map(([name, data]) => ({ name, ...data }))
-      .sort((a, b) => b.spent + b.inflow - (a.spent + a.inflow))
-      .slice(0, 8);
-  }, [transactions, vaultCards]);
-
-  // Stats for currently focused card in the swipeable deck
-  const activeCardStats = useMemo(() => {
-    if (!activeCard || activeCard.id === 'card-vault-primary') {
-      return {
-        label: 'Available vault balance',
-        amount: overallNetBalance,
-        count: transactions.length,
-        isVault: true,
-      };
-    }
-    const targetName = activeCard.name.toLowerCase();
-    let spent = 0;
-    let inflow = 0;
-    let count = 0;
-    transactions.forEach((tx) => {
-      const mode = (tx.paymentMode || '').toLowerCase();
-      const acc = (tx.account || '').toLowerCase();
-      if (mode === targetName || acc === targetName) {
-        if (tx.type === 'Expense') spent += tx.amount;
-        if (tx.type === 'Income') inflow += tx.amount;
-        count += 1;
-      }
-    });
-    return {
-      label: `${activeCard.name} · Card Spend`,
-      amount: spent,
-      inflow,
-      count,
-      isVault: false,
-    };
-  }, [activeCard, overallNetBalance, transactions]);
+  const creditCardsList = useMemo(() => {
+    return vaultCards
+      .map((c, idx) => ({ card: c, indexInVault: idx }))
+      .filter(({ card }) => getCardType(card) === 'Credit');
+  }, [vaultCards]);
 
   const activeTheme = getCardThemeClasses(activeCard?.theme || 'obsidian');
   const prevTheme = getCardThemeClasses(prevCard?.theme || 'platinum');
@@ -703,7 +741,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
         id="cards-section-showcase"
         className="grid grid-cols-1 lg:grid-cols-12 gap-5"
       >
-        {/* Left: Interactive Swipeable 3-Card Deck + Add Card Action */}
+        {/* Left: Interactive Swipeable & Flippable 3-Card Deck */}
         <div className="lg:col-span-5 bg-white dark:bg-[#161614] rounded-2xl p-4 sm:p-6 border border-[#E5E0D4] dark:border-[#282622] flex flex-col items-center justify-between transition-colors shadow-2xs min-w-0 overflow-hidden">
           {/* Card Deck Top Header Bar */}
           <div className="w-full flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -719,12 +757,24 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
-                id="btn-toggle-card-lock"
-                onClick={handleRequestUnlockOnly}
-                title={isCardUnlocked ? 'Lock card details' : 'Unlock full card details with PIN'}
+                id="btn-flip-card"
+                onClick={() => setIsCardFlipped((prev) => !prev)}
+                title={isCardFlipped ? 'Flip to card front' : 'Flip to display UPI QR code and payment details'}
                 className="min-h-[42px] px-3 py-2 rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] bg-[#F6F5F0] hover:bg-[#EFECE4] dark:bg-[#22211D] dark:hover:bg-[#2C2A25] text-[#141412] dark:text-[#F6F5F0] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs"
               >
-                {isCardUnlocked ? (
+                <RotateCw className="w-3.5 h-3.5 text-[#C5A059] shrink-0" />
+                <span className="hidden sm:inline">{isCardFlipped ? 'Card Front' : 'Flip to QR'}</span>
+                <span className="sm:hidden">{isCardFlipped ? 'Front' : 'QR'}</span>
+              </button>
+
+              <button
+                type="button"
+                id="btn-toggle-card-lock"
+                onClick={handleRequestUnlockOnly}
+                title={isContentUnlocked ? 'Lock sensitive card and payment information' : 'Unlock full card details with PIN'}
+                className="min-h-[42px] px-3 py-2 rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] bg-[#F6F5F0] hover:bg-[#EFECE4] dark:bg-[#22211D] dark:hover:bg-[#2C2A25] text-[#141412] dark:text-[#F6F5F0] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs"
+              >
+                {isContentUnlocked ? (
                   <>
                     <Unlock className="w-3.5 h-3.5 text-[#C5A059] shrink-0" />
                     <span className="hidden sm:inline">Lock</span>
@@ -736,16 +786,18 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                   </>
                 )}
               </button>
+
               <button
                 type="button"
                 id="btn-open-edit-card-modal"
                 onClick={() => handleRequestEditCard(activeCard)}
-                title="Edit card details (enter PIN if locked, no account password required)"
+                title="Edit card details"
                 className="min-h-[42px] px-3.5 py-2 rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] bg-[#F6F5F0] hover:bg-[#EFECE4] dark:bg-[#22211D] dark:hover:bg-[#2C2A25] text-[#141412] dark:text-[#F6F5F0] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs"
               >
                 <Edit3 className="w-3.5 h-3.5 text-[#C5A059] shrink-0" />
-                <span>Edit Card</span>
+                <span>Edit</span>
               </button>
+
               <button
                 type="button"
                 id="btn-open-add-card-modal"
@@ -756,12 +808,12 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                 className="min-h-[42px] px-3.5 py-2 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs"
               >
                 <Plus className="w-3.5 h-3.5 stroke-[2.5] shrink-0" />
-                <span>Add Card</span>
+                <span>Add</span>
               </button>
             </div>
           </div>
 
-          {/* Interactive Swipeable 3-Card Stack (Fluid sizing for 320px -> 1920px) */}
+          {/* Interactive Swipeable & Flippable 3-Card Stack */}
           <div className="relative w-full max-w-[356px] h-[196px] sm:h-[202px] flex items-center justify-center my-1 select-none overflow-hidden">
             {/* Left Peeking Card (Click to switch to Previous Card) */}
             {totalCards > 1 && prevCard && (
@@ -776,7 +828,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                   {prevCard.name}
                 </div>
                 <div className="text-[11px] tracking-widest tabular-nums opacity-85">
-                  {isCardUnlocked
+                  {isContentUnlocked
                     ? `${prevCard.prefix4} •••• •••• ${prevCard.last4}`
                     : `•••• •••• •••• ${prevCard.last4}`}
                 </div>
@@ -801,14 +853,15 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
               </div>
             )}
 
-            {/* Center Active Swipeable Card */}
+            {/* Center Active Card with 3D Flip capability */}
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
                 key={activeCard.id}
-                drag="x"
+                drag={!isCardFlipped ? 'x' : undefined}
                 dragConstraints={{ left: 0, right: 0 }}
                 dragElastic={0.45}
                 onDragEnd={(_, info) => {
+                  if (isCardFlipped) return;
                   if (info.offset.x < -40 || info.velocity.x < -280) {
                     handleNextCard();
                   } else if (info.offset.x > 40 || info.velocity.x > 280) {
@@ -819,100 +872,213 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                 animate={{ opacity: 1, x: 0, scale: 1 }}
                 exit={{ opacity: 0, x: swipeDirection * -42, scale: 0.96 }}
                 transition={{ duration: 0.22, ease: 'easeOut' }}
-                className={`relative z-10 w-[min(86%,282px)] h-[166px] sm:h-[172px] rounded-2xl ${activeTheme.bg} ${activeTheme.text} p-4 sm:p-5 flex flex-col justify-between shadow-xl border ${activeTheme.border} overflow-hidden cursor-grab active:cursor-grabbing touch-pan-y`}
+                style={{ perspective: 1000 }}
+                className="relative z-10 w-[min(88%,292px)] h-[172px] sm:h-[180px]"
               >
-                <div
-                  aria-hidden="true"
-                  className="pointer-events-none absolute -right-10 -bottom-10 w-44 h-44 rounded-full bg-white/[0.06] blur-xl"
-                />
-
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="text-xs font-semibold tracking-tight truncate">
-                      ▲ {activeCard.name}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleRequestEditCard(activeCard);
-                      }}
-                      title="Edit card details (enter PIN if locked, no account password required)"
-                      className="px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                      <span>Edit</span>
-                    </button>
-                    <Wifi className="w-4 h-4 opacity-80 rotate-90 shrink-0" />
-                  </div>
-                </div>
-
-                {/* Metallic Chip, Security Lock State & Card Number */}
-                <div className="space-y-2 my-auto pt-1">
-                  <div className="flex items-center justify-between">
+                <motion.div
+                  animate={{ rotateY: isCardFlipped ? 180 : 0 }}
+                  transition={{ duration: 0.5, ease: [0.23, 1, 0.32, 1] }}
+                  style={{ transformStyle: 'preserve-3d' }}
+                  className="relative w-full h-full"
+                >
+                  {/* FRONT FACE (Card Details with NO "Unlock with PIN" text) */}
+                  <div
+                    style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
+                    className={`absolute inset-0 rounded-2xl ${activeTheme.bg} ${activeTheme.text} p-4 sm:p-5 flex flex-col justify-between shadow-xl border ${activeTheme.border} overflow-hidden cursor-grab active:cursor-grabbing touch-pan-y`}
+                  >
                     <div
-                      className={`w-8 sm:w-9 h-5.5 sm:h-6 rounded-md bg-gradient-to-br ${activeTheme.chip} border border-white/25 opacity-90`}
+                      aria-hidden="true"
+                      className="pointer-events-none absolute -right-10 -bottom-10 w-44 h-44 rounded-full bg-white/[0.06] blur-xl"
                     />
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (isCardUnlocked) {
-                          setIsCardUnlocked(false);
-                        } else {
-                          handleRequestUnlockOnly();
-                        }
-                      }}
-                      title={
-                        isCardUnlocked
-                          ? 'Card details unlocked · Click to lock'
-                          : 'Card details locked · Click to unlock with PIN'
-                      }
-                      className="px-2 py-0.5 rounded-full bg-black/40 hover:bg-black/60 text-[9px] font-medium text-white/90 border border-white/15 flex items-center gap-1 transition-colors cursor-pointer"
-                    >
-                      {isCardUnlocked ? (
-                        <>
-                          <Unlock className="w-2.5 h-2.5 text-[#C5A059]" />
-                          <span>Full Details Unlocked</span>
-                        </>
-                      ) : (
-                        <>
-                          <Lock className="w-2.5 h-2.5 text-white/70" />
-                          <span>Locked · Ending in {activeCard.last4}</span>
-                        </>
-                      )}
-                    </button>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-xs font-semibold tracking-tight truncate">
+                          ▲ {activeCard.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsCardFlipped(true);
+                          }}
+                          title="Flip card to display UPI QR code & UPI details"
+                          className="px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer text-white"
+                        >
+                          <QrCode className="w-3 h-3 text-[#C5A059]" />
+                          <span>Flip to QR</span>
+                        </button>
+                        <Wifi className="w-4 h-4 opacity-80 rotate-90 shrink-0" />
+                      </div>
+                    </div>
+
+                    {/* Metallic Chip & Card Number (Pill removed completely: No 'Unlock with PIN' text) */}
+                    <div className="space-y-2 my-auto pt-1">
+                      <div className="flex items-center justify-between">
+                        <div
+                          className={`w-8 sm:w-9 h-5.5 sm:h-6 rounded-md bg-gradient-to-br ${activeTheme.chip} border border-white/25 opacity-90`}
+                        />
+                      </div>
+
+                      {/* Masked when locked, Full 16 digits when unlocked */}
+                      <div className="text-[12px] sm:text-[14px] tracking-[0.16em] sm:tracking-[0.18em] font-medium tabular-nums truncate">
+                        {isContentUnlocked
+                          ? `${activeCard.prefix4 || '4532'} ${activeCard.middleDigits || '8841 9200'} ${activeCard.last4}`
+                          : `•••• •••• •••• ${activeCard.last4}`}
+                      </div>
+                    </div>
+
+                    {/* Expiry, Holder & Network Badge */}
+                    <div className="flex items-end justify-between gap-2 pt-1">
+                      <div className="min-w-0">
+                        <div className={`text-[9px] ${activeTheme.subtext} tracking-wider`}>
+                          {isContentUnlocked ? `VALID ${activeCard.expiry}` : 'VALID ••/••'}
+                        </div>
+                        <div className="text-[10px] font-medium tracking-wider truncate max-w-[135px] sm:max-w-[145px] mt-0.5">
+                          {cardHolder}
+                        </div>
+                      </div>
+                      <div className="text-right leading-none shrink-0">
+                        <div className="text-sm sm:text-base font-bold italic tracking-wider">
+                          {activeCard.network}
+                        </div>
+                        <div className={`text-[8px] ${activeTheme.subtext} tracking-wide mt-0.5`}>
+                          {activeCard.tier}
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Masked when locked, Full 16 digits when unlocked */}
-                  <div className="text-[11px] sm:text-[13px] tracking-[0.15em] sm:tracking-[0.18em] font-medium tabular-nums truncate">
-                    {isCardUnlocked
-                      ? `${activeCard.prefix4 || '4532'} ${activeCard.middleDigits || '8841 9200'} ${activeCard.last4}`
-                      : `•••• •••• •••• ${activeCard.last4}`}
-                  </div>
-                </div>
+                  {/* BACK FACE (QR Code & UPI Details - Masked in locked mode, revealed after PIN unlock) */}
+                  <div
+                    style={{
+                      backfaceVisibility: 'hidden',
+                      WebkitBackfaceVisibility: 'hidden',
+                      transform: 'rotateY(180deg)',
+                    }}
+                    className={`absolute inset-0 rounded-2xl ${activeTheme.bg} ${activeTheme.text} p-3 sm:p-3.5 flex flex-col justify-between shadow-xl border ${activeTheme.border} overflow-hidden`}
+                  >
+                    {/* Magnetic Stripe Band */}
+                    <div className="-mx-3 -mt-3 sm:-mx-3.5 sm:-mt-3.5 h-6 sm:h-7 bg-black/85 border-b border-white/10 flex items-center px-3 justify-between">
+                      <span className="text-[8px] tracking-[0.2em] font-mono text-white/50 uppercase">
+                        inflotrack Secure Vault
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsCardFlipped(false)}
+                        className="text-[9px] font-semibold text-[#C5A059] hover:text-[#D1AF6A] flex items-center gap-1 cursor-pointer bg-black/50 px-2 py-0.5 rounded"
+                      >
+                        <RotateCw className="w-2.5 h-2.5" />
+                        <span>Card Front</span>
+                      </button>
+                    </div>
 
-                {/* Expiry, Holder & Network Badge */}
-                <div className="flex items-end justify-between gap-2 pt-1">
-                  <div className="min-w-0">
-                    <div className={`text-[9px] ${activeTheme.subtext} tracking-wider`}>
-                      {isCardUnlocked ? `VALID ${activeCard.expiry}` : 'VALID ••/••'}
+                    {/* Signature Strip & CVV Row */}
+                    <div className="flex items-center justify-between gap-2 mt-0.5 px-0.5">
+                      <div className="flex-1 h-5 bg-white/90 rounded px-2 text-[10px] text-zinc-900 font-serif italic flex items-center overflow-hidden tracking-wider select-none truncate">
+                        {cardHolder}
+                      </div>
+                      <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-black/40 border border-white/15 shrink-0">
+                        <span className="text-[8px] font-medium tracking-wider text-white/70">CVV</span>
+                        <span className="text-[11px] font-mono font-bold tracking-widest text-[#C5A059]">
+                          {isContentUnlocked ? (activeCard.cvv || '842') : '•••'}
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-[10px] font-medium tracking-wider truncate max-w-[135px] sm:max-w-[145px] mt-0.5">
-                      {cardHolder}
+
+                    {/* UPI QR Code & Payment Information Box */}
+                    <div className="flex items-center gap-2.5 mt-1 p-2 rounded-xl bg-black/35 border border-white/10">
+                      {/* QR Code Container (Masked when locked, crisp when unlocked) */}
+                      <div
+                        onClick={() => {
+                          if (!isContentUnlocked) {
+                            handleRequestUnlockOnly();
+                          }
+                        }}
+                        className={`w-14 h-14 sm:w-16 sm:h-16 p-1 rounded-lg bg-white shrink-0 relative overflow-hidden flex items-center justify-center ${
+                          !isContentUnlocked ? 'cursor-pointer' : ''
+                        }`}
+                      >
+                        <div
+                          className={`w-full h-full ${
+                            !isContentUnlocked ? 'filter blur-[3.5px] select-none pointer-events-none' : ''
+                          }`}
+                        >
+                          <UpiQrCodeSvg
+                            upiId={activeCard.qrCodeData || activeCard.upiId || 'inflotrack.vault@okaxis'}
+                            name={activeCard.name}
+                            className="w-full h-full"
+                          />
+                        </div>
+                        {!isContentUnlocked && (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRequestUnlockOnly();
+                            }}
+                            className="absolute inset-0 bg-black/65 backdrop-blur-[1px] flex flex-col items-center justify-center p-0.5 text-center cursor-pointer"
+                            title="Protected vault details · Click to unlock"
+                          >
+                            <Lock className="w-3.5 h-3.5 text-[#C5A059] mb-0.5" />
+                            <span className="text-[7.5px] font-bold text-white tracking-wider uppercase">
+                              Protected
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* UPI Details */}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[8.5px] font-medium uppercase tracking-wider opacity-70">
+                          UPI Payment ID
+                        </div>
+                        {isContentUnlocked ? (
+                          <>
+                            <div className="text-[10px] sm:text-[11px] font-mono font-semibold tracking-tight truncate mt-0.5">
+                              {activeCard.upiId || 'inflotrack.vault@okaxis'}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <button
+                                type="button"
+                                onClick={() => handleCopyUpi(activeCard.upiId || 'inflotrack.vault@okaxis')}
+                                className="px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-[9px] font-semibold flex items-center gap-1 transition-colors cursor-pointer text-white"
+                              >
+                                {copiedUpi ? (
+                                  <>
+                                    <Check className="w-2.5 h-2.5 text-emerald-400" />
+                                    <span>Copied!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-2.5 h-2.5" />
+                                    <span>Copy UPI</span>
+                                  </>
+                                )}
+                              </button>
+                              <span className="text-[8px] opacity-60">Scan to pay</span>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="text-[10px] font-mono tracking-widest opacity-60 mt-0.5">
+                              ••••••••••••@•••
+                            </div>
+                            <div
+                              onClick={handleRequestUnlockOnly}
+                              className="mt-1 inline-flex items-center gap-1 text-[8.5px] font-medium text-white/70 hover:text-[#C5A059] transition-colors cursor-pointer"
+                              title="Protected vault details · Click to unlock"
+                            >
+                              <Lock className="w-2.5 h-2.5 text-[#C5A059]" />
+                              <span>Protected</span>
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div className="text-right leading-none shrink-0">
-                    <div className="text-sm sm:text-base font-bold italic tracking-wider">
-                      {activeCard.network}
-                    </div>
-                    <div className={`text-[8px] ${activeTheme.subtext} tracking-wide mt-0.5`}>
-                      {activeCard.tier}
-                    </div>
-                  </div>
-                </div>
+                </motion.div>
               </motion.div>
             </AnimatePresence>
           </div>
@@ -925,7 +1091,10 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                 <button
                   key={c.id}
                   type="button"
-                  onClick={() => handleSelectCardIndex(idx)}
+                  onClick={() => {
+                    setIsCardFlipped(false);
+                    handleSelectCardIndex(idx);
+                  }}
                   aria-label={`View ${c.name}`}
                   className={`h-2 rounded-full transition-all cursor-pointer ${
                     isCurrent
@@ -937,70 +1106,18 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
             })}
           </div>
 
-          {/* Active Card Balance/Spend Readout & Quick Card Actions */}
-          <div className="w-full pt-3 border-t border-[#EFECE4] dark:border-[#24231F] flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[11px] text-[#78746B] dark:text-[#9E9B92] truncate">
-                {activeCardStats.label}
-              </p>
-              <div className="font-display tabular-nums text-2xl font-semibold text-[#141412] dark:text-[#F6F5F0] tracking-tight">
-                {displayAmount(activeCardStats.amount)}
-              </div>
-              <p className="text-[10px] text-[#8E7952] dark:text-[#C5A059] tabular-nums">
-                {activeCardStats.count} {activeCardStats.count === 1 ? 'recorded entry' : 'recorded entries'}
-              </p>
-            </div>
-
-            {onOpenAddGoal && (
-              <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => onOpenAddGoal('Income', 'Salary')}
-                  className="flex flex-col items-center gap-1 cursor-pointer min-w-[44px]"
-                >
-                  <TopUpWithdrawIconBadge
-                    icon={<Plus className="w-3.5 h-3.5 stroke-[2.5]" />}
-                    shape="square"
-                    size="sm"
-                  />
-                  <span className="text-[10px] font-medium text-[#141412] dark:text-[#E6E4DD]">
-                    Top Up
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onOpenAddGoal('Expense', 'Shopping')}
-                  className="flex flex-col items-center gap-1 cursor-pointer min-w-[44px]"
-                >
-                  <TopUpWithdrawIconBadge
-                    icon={<ArrowDown className="w-3.5 h-3.5 stroke-[2.5]" />}
-                    shape="circle"
-                    size="sm"
-                  />
-                  <span className="text-[10px] font-medium text-[#141412] dark:text-[#E6E4DD]">
-                    Spend
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onOpenAddGoal('Transfer', 'Credit Card Bill Payment')}
-                  className="flex flex-col items-center gap-1 cursor-pointer min-w-[44px]"
-                >
-                  <TopUpWithdrawIconBadge
-                    icon={<ArrowUp className="w-3.5 h-3.5 stroke-[2.5]" />}
-                    shape="circle"
-                    size="sm"
-                  />
-                  <span className="text-[10px] font-medium text-[#141412] dark:text-[#E6E4DD]">
-                    Pay Bill
-                  </span>
-                </button>
-              </div>
-            )}
+          {/* Clean Card Summary Footer Badge (Removed: Available Vault Balance, ₹1,000, 1 recorded entry, Spend, Pay Bill) */}
+          <div className="w-full pt-2.5 border-t border-[#EFECE4] dark:border-[#24231F] flex items-center justify-between text-xs text-[#78746B] dark:text-[#9E9B92]">
+            <span className="font-medium text-[#141412] dark:text-[#F6F5F0] truncate">
+              {activeCard.name}
+            </span>
+            <span className="text-[11px] font-medium text-[#8E7952] dark:text-[#C5A059] shrink-0">
+              {activeCard.network} · {activeCard.tier || getCardType(activeCard)}
+            </span>
           </div>
         </div>
 
-        {/* Right: Interactive Linked Payment Cards & Modes Breakdown */}
+        {/* Right: Redesigned Interactive Card Selector with Distinct Debit & Credit Sections (No card details displayed) */}
         <div className="lg:col-span-7 bg-white dark:bg-[#161614] rounded-2xl p-4 sm:p-6 border border-[#E5E0D4] dark:border-[#282622] flex flex-col justify-between transition-colors shadow-2xs min-w-0">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
             <div className="min-w-0">
@@ -1011,120 +1128,183 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                 Linked Payment Cards & Modes
               </h3>
               <p className="text-xs text-[#78746B] dark:text-[#9E9B92]">
-                Select any card below to focus it in the swipeable deck
+                Select any card to display, flip, and manage in the 3D card showcase
               </p>
             </div>
-            <div className="flex flex-col min-[380px]:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
+                id="btn-open-add-card-from-selector"
                 onClick={() => {
                   setAddCardError(null);
                   setIsAddCardOpen(true);
                 }}
-                className="w-full sm:w-auto min-h-[42px] px-3.5 py-2 rounded-xl bg-[#F6F5F0] hover:bg-[#EFECE4] dark:bg-[#22211D] dark:hover:bg-[#2C2A25] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                className="min-h-[42px] px-3.5 py-2 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-xs font-semibold text-[#F6F5F0] dark:text-[#111110] flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-2xs"
               >
-                <Plus className="w-3.5 h-3.5 text-[#C5A059] shrink-0" />
-                <span>New Card</span>
+                <Plus className="w-3.5 h-3.5 stroke-[2.4]" />
+                <span>Add Card</span>
               </button>
-              {onOpenAddGoal && (
-                <button
-                  type="button"
-                  onClick={() => onOpenAddGoal('Transfer', 'Credit Card Bill Payment')}
-                  className="w-full sm:w-auto min-h-[42px] px-3.5 py-2 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-xs font-semibold text-[#F6F5F0] dark:text-[#111110] flex items-center justify-center transition-colors cursor-pointer whitespace-nowrap"
-                >
-                  Card Bill Payment
-                </button>
-              )}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {cardPaymentSummary.map((card) => {
-              const matchingDeckIdx = vaultCards.findIndex(
-                (vc) => vc.name.toLowerCase() === card.name.toLowerCase()
-              );
-              const isFocusedInDeck = matchingDeckIdx >= 0 && matchingDeckIdx === safeActiveIndex;
+          <div className="space-y-4">
+            {/* 1. DISTINCT SECTION: DEBIT CARDS */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-[#8E7952] dark:text-[#C5A059]" />
+                  <h4 className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] uppercase tracking-wider">
+                    Debit Cards & Vault Accounts
+                  </h4>
+                </div>
+                <span className="text-[11px] font-medium text-[#78746B] dark:text-[#9E9B92]">
+                  {debitCardsList.length} {debitCardsList.length === 1 ? 'card' : 'cards'}
+                </span>
+              </div>
 
-              return (
-                <div
-                  key={card.name}
-                  onClick={() => {
-                    if (matchingDeckIdx >= 0) {
-                      handleSelectCardIndex(matchingDeckIdx);
-                    } else {
-                      const updated = addCustomVaultCard({
-                        name: card.name,
-                        last4: String(1000 + ((card.name.length * 731) % 8999)),
-                        prefix4: '4532',
-                        expiry: '10/29',
-                        network: 'VISA',
-                        tier: 'Platinum',
-                        theme: 'navy',
-                      });
-                      setVaultCards(updated);
-                      setSwipeDirection(1);
-                      setActiveCardIndex(updated.length - 1);
-                    }
-                  }}
-                  className={`p-3.5 rounded-2xl text-left flex items-center justify-between gap-3 transition-all cursor-pointer border ${
-                    isFocusedInDeck
-                      ? 'bg-[#F6F5F0] dark:bg-[#22211D] border-[#C5A059] ring-1 ring-[#C5A059]/40 shadow-2xs'
-                      : 'bg-[#F6F5F0]/60 dark:bg-[#1C1C19] border-[#E5E0D4] dark:border-[#282622] hover:border-[#C5A059]/50'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {debitCardsList.map(({ card, indexInVault }) => {
+                  const isFocusedInDeck = indexInVault === safeActiveIndex;
+                  return (
                     <div
-                      className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                      key={card.id}
+                      onClick={() => {
+                        setIsCardFlipped(false);
+                        handleSelectCardIndex(indexInVault);
+                      }}
+                      className={`p-3 rounded-xl text-left flex items-center justify-between gap-3 transition-all cursor-pointer border ${
                         isFocusedInDeck
-                          ? 'bg-[#141412] dark:bg-[#C5A059] text-[#F6F5F0] dark:text-[#111110]'
-                          : 'bg-[#E5E0D4] dark:bg-[#282622] text-[#141412] dark:text-[#F6F5F0]'
+                          ? 'bg-[#F6F5F0] dark:bg-[#22211D] border-[#C5A059] ring-1 ring-[#C5A059]/40 shadow-2xs'
+                          : 'bg-[#F6F5F0]/60 dark:bg-[#1C1C19] border-[#E5E0D4] dark:border-[#282622] hover:border-[#C5A059]/50'
                       }`}
                     >
-                      <CreditCard className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] truncate">
-                        {card.name}
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                            isFocusedInDeck
+                              ? 'bg-[#141412] dark:bg-[#C5A059] text-[#F6F5F0] dark:text-[#111110]'
+                              : 'bg-[#E5E0D4] dark:bg-[#282622] text-[#141412] dark:text-[#F6F5F0]'
+                          }`}
+                        >
+                          <CreditCard className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] truncate">
+                            {card.name}
+                          </div>
+                          <div className="text-[10px] text-[#78746B] dark:text-[#9E9B92] truncate">
+                            {card.network} · Debit
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-[10px] font-mono text-[#8E7952] dark:text-[#C5A059] tracking-wider truncate">
-                        {matchingDeckIdx >= 0
-                          ? isCardUnlocked
-                            ? `${vaultCards[matchingDeckIdx].prefix4 || '4532'} ${vaultCards[matchingDeckIdx].middleDigits || '8841 9200'} ${vaultCards[matchingDeckIdx].last4}`
-                            : `•••• •••• •••• ${vaultCards[matchingDeckIdx].last4}`
-                          : `${card.count} ${card.count === 1 ? 'transaction' : 'transactions'}`}
-                      </div>
-                      <div className="text-[10px] text-[#78746B] dark:text-[#9E9B92] tabular-nums">
-                        {card.count} {card.count === 1 ? 'transaction' : 'transactions'}
-                      </div>
-                    </div>
-                  </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className="text-right">
-                      <div className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] tabular-nums">
-                        {displayAmount(card.spent)}
-                      </div>
-                      <div className="text-[10px] text-[#8E7952] dark:text-[#C5A059]">
-                        {isFocusedInDeck ? 'Active on Deck' : 'Spent'}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isFocusedInDeck ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-[#C5A059]/15 text-[#8E7952] dark:text-[#C5A059] border border-[#C5A059]/30">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#C5A059] animate-pulse" />
+                            Active on Deck
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-medium text-[#8E7952] dark:text-[#C5A059]">
+                            Tap to focus
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRequestEditCard(card);
+                          }}
+                          title="Edit card details"
+                          className="w-7 h-7 rounded-lg bg-white/80 dark:bg-[#282622] hover:bg-[#E5E0D4] dark:hover:bg-[#34322C] text-[#78746B] hover:text-[#141412] dark:hover:text-[#F6F5F0] flex items-center justify-center transition-colors cursor-pointer"
+                        >
+                          <Edit3 className="w-3.5 h-3.5 text-[#C5A059]" />
+                        </button>
                       </div>
                     </div>
-                    {matchingDeckIdx >= 0 && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRequestEditCard(vaultCards[matchingDeckIdx]);
-                        }}
-                        title="Edit card details (requires PIN to unlock)"
-                        className="w-7 h-7 rounded-lg bg-white/80 dark:bg-[#282622] hover:bg-[#E5E0D4] dark:hover:bg-[#34322C] text-[#78746B] hover:text-[#141412] dark:hover:text-[#F6F5F0] flex items-center justify-center transition-colors cursor-pointer"
-                      >
-                        <Edit3 className="w-3.5 h-3.5 text-[#C5A059]" />
-                      </button>
-                    )}
-                  </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 2. DISTINCT SECTION: CREDIT CARDS */}
+            <div>
+              <div className="flex items-center justify-between mb-2 pt-2 border-t border-[#EFECE4] dark:border-[#24231F]">
+                <div className="flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-[#8E7952] dark:text-[#C5A059]" />
+                  <h4 className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] uppercase tracking-wider">
+                    Credit Cards
+                  </h4>
                 </div>
-              );
-            })}
+                <span className="text-[11px] font-medium text-[#78746B] dark:text-[#9E9B92]">
+                  {creditCardsList.length} {creditCardsList.length === 1 ? 'card' : 'cards'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {creditCardsList.map(({ card, indexInVault }) => {
+                  const isFocusedInDeck = indexInVault === safeActiveIndex;
+                  return (
+                    <div
+                      key={card.id}
+                      onClick={() => {
+                        setIsCardFlipped(false);
+                        handleSelectCardIndex(indexInVault);
+                      }}
+                      className={`p-3 rounded-xl text-left flex items-center justify-between gap-3 transition-all cursor-pointer border ${
+                        isFocusedInDeck
+                          ? 'bg-[#F6F5F0] dark:bg-[#22211D] border-[#C5A059] ring-1 ring-[#C5A059]/40 shadow-2xs'
+                          : 'bg-[#F6F5F0]/60 dark:bg-[#1C1C19] border-[#E5E0D4] dark:border-[#282622] hover:border-[#C5A059]/50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                            isFocusedInDeck
+                              ? 'bg-[#141412] dark:bg-[#C5A059] text-[#F6F5F0] dark:text-[#111110]'
+                              : 'bg-[#E5E0D4] dark:bg-[#282622] text-[#141412] dark:text-[#F6F5F0]'
+                          }`}
+                        >
+                          <CreditCard className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] truncate">
+                            {card.name}
+                          </div>
+                          <div className="text-[10px] text-[#78746B] dark:text-[#9E9B92] truncate">
+                            {card.network} · {card.tier || 'Credit'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isFocusedInDeck ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-[#C5A059]/15 text-[#8E7952] dark:text-[#C5A059] border border-[#C5A059]/30">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#C5A059] animate-pulse" />
+                            Active on Deck
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-medium text-[#8E7952] dark:text-[#C5A059]">
+                            Tap to focus
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRequestEditCard(card);
+                          }}
+                          title="Edit card details"
+                          className="w-7 h-7 rounded-lg bg-white/80 dark:bg-[#282622] hover:bg-[#E5E0D4] dark:hover:bg-[#34322C] text-[#78746B] hover:text-[#141412] dark:hover:text-[#F6F5F0] flex items-center justify-center transition-colors cursor-pointer"
+                        >
+                          <Edit3 className="w-3.5 h-3.5 text-[#C5A059]" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1303,10 +1483,10 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                 PIN Verified · Details Unlocked
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[#F6F5F0] dark:bg-[#22211D] text-[#5E5B52] dark:text-[#A39F95] border border-[#E5E0D4] dark:border-[#2C2A25]">
-                <LockOpen className="w-3 h-3" />
+                <Unlock className="w-3 h-3" />
                 No Account Password Needed
               </span>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[#F6F5F0] dark:bg-[#22211D] text-[#8E7952] dark:text-[#C5A059] border border-[#E5E0D4] dark:border-[#2C2A25]">
                 <ShieldCheck className="w-3 h-3" />
                 Card Deletion Disabled
               </span>
@@ -1720,23 +1900,23 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
 
           {/* Sub-Navigator when in Month mode */}
           {timeframe === 'month' && (
-            <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1 shrink-0">
+            <div className="flex items-center gap-1 bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] rounded-xl px-2 py-1 shrink-0">
               <button
                 type="button"
                 onClick={handlePrevMonth}
                 title="Previous Month"
-                className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 rounded-md transition-colors cursor-pointer"
+                className="p-1 text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-[#F6F5F0] rounded-md transition-colors cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <span className="text-xs font-bold text-slate-800 dark:text-slate-100 px-2 min-w-[90px] text-center">
+              <span className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] px-2 min-w-[90px] text-center">
                 {formatMonthYear(selectedMonth)}
               </span>
               <button
                 type="button"
                 onClick={handleNextMonth}
                 title="Next Month"
-                className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 rounded-md transition-colors cursor-pointer"
+                className="p-1 text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-[#F6F5F0] rounded-md transition-colors cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
@@ -1745,23 +1925,23 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
 
           {/* Sub-Navigator when in Year mode */}
           {timeframe === 'year' && (
-            <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1 shrink-0">
+            <div className="flex items-center gap-1 bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] rounded-xl px-2 py-1 shrink-0">
               <button
                 type="button"
                 onClick={handlePrevYear}
                 title="Previous Year"
-                className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 rounded-md transition-colors cursor-pointer"
+                className="p-1 text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-[#F6F5F0] rounded-md transition-colors cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <span className="text-xs font-bold text-slate-800 dark:text-slate-100 px-2 min-w-[50px] text-center">
+              <span className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] px-2 min-w-[50px] text-center">
                 {selectedYear}
               </span>
               <button
                 type="button"
                 onClick={handleNextYear}
                 title="Next Year"
-                className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 rounded-md transition-colors cursor-pointer"
+                className="p-1 text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-[#F6F5F0] rounded-md transition-colors cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
@@ -1775,37 +1955,37 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
         {/* 1. Savings & Investments Target */}
         <div
           id="card-goals-savings"
-          className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between hover:border-blue-300 dark:hover:border-blue-700 transition-all group"
+          className="bg-white dark:bg-[#161614] p-4 sm:p-5 rounded-2xl border border-[#E5E0D4] dark:border-[#282622] shadow-2xs flex flex-col justify-between hover:border-[#C5A059]/60 dark:hover:border-[#C5A059]/50 transition-all group"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            <span className="text-[11px] font-semibold text-[#78746B] dark:text-[#9E9B92] uppercase tracking-wider">
               Total Savings
             </span>
-            <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] text-[#8E7952] dark:text-[#C5A059] flex items-center justify-center">
               <PiggyBank className="w-4 h-4" />
             </div>
           </div>
 
           <div className="mt-3.5">
             <div className="flex items-baseline justify-between gap-2">
-              <div className="text-xl sm:text-2xl font-black text-blue-600 dark:text-blue-400 tracking-tight font-mono">
+              <div className="text-xl sm:text-2xl font-bold text-[#141412] dark:text-[#F6F5F0] tracking-tight font-display tabular-nums">
                 {displayAmount(goalsStats.savings)}
               </div>
-              <span className="text-xs font-black px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/80 shrink-0">
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#C5A059]/15 text-[#8E7952] dark:text-[#C5A059] border border-[#C5A059]/30 shrink-0">
                 {savingsProgress.percentage}%
               </span>
             </div>
 
             {/* Target Progress Bar */}
-            <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full mt-2.5 overflow-hidden">
+            <div className="w-full h-1.5 bg-[#E5E0D4] dark:bg-[#282622] rounded-full mt-3 overflow-hidden">
               <div
                 style={{ width: `${savingsProgress.cappedPercentage}%` }}
-                className="bg-blue-500 h-full rounded-full transition-all duration-500"
+                className="bg-[#C5A059] h-full rounded-full transition-all duration-500"
               />
             </div>
 
-            <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500 font-medium">
-              <span className="truncate">Target: {isUnlocked ? formatINR(savingsTargetVal) : '••••••'}</span>
+            <div className="mt-2 flex items-center justify-between text-[11px] text-[#78746B] dark:text-[#9E9B92] font-medium">
+              <span className="truncate">Target: {isContentUnlocked ? formatINR(savingsTargetVal) : '••••••'}</span>
             </div>
           </div>
         </div>
@@ -1813,37 +1993,37 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
         {/* 2. Emergency Fund Target */}
         <div
           id="card-goals-emergency"
-          className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between hover:border-amber-300 dark:hover:border-amber-700 transition-all group"
+          className="bg-white dark:bg-[#161614] p-4 sm:p-5 rounded-2xl border border-[#E5E0D4] dark:border-[#282622] shadow-2xs flex flex-col justify-between hover:border-[#C5A059]/60 dark:hover:border-[#C5A059]/50 transition-all group"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            <span className="text-[11px] font-semibold text-[#78746B] dark:text-[#9E9B92] uppercase tracking-wider">
               Emergency Fund
             </span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] text-[#8E7952] dark:text-[#C5A059] flex items-center justify-center">
               <ShieldCheck className="w-4 h-4" />
             </div>
           </div>
 
           <div className="mt-3.5">
             <div className="flex items-baseline justify-between gap-2">
-              <div className="text-xl sm:text-2xl font-black text-amber-600 dark:text-amber-400 tracking-tight font-mono">
+              <div className="text-xl sm:text-2xl font-bold text-[#141412] dark:text-[#F6F5F0] tracking-tight font-display tabular-nums">
                 {displayAmount(goalsStats.emergencyFund)}
               </div>
-              <span className="text-xs font-black px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/80 shrink-0">
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#C5A059]/15 text-[#8E7952] dark:text-[#C5A059] border border-[#C5A059]/30 shrink-0">
                 {emergencyProgress.percentage}%
               </span>
             </div>
 
             {/* Target Progress Bar */}
-            <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full mt-2.5 overflow-hidden">
+            <div className="w-full h-1.5 bg-[#E5E0D4] dark:bg-[#282622] rounded-full mt-3 overflow-hidden">
               <div
                 style={{ width: `${emergencyProgress.cappedPercentage}%` }}
-                className="bg-amber-500 h-full rounded-full transition-all duration-500"
+                className="bg-[#C5A059] h-full rounded-full transition-all duration-500"
               />
             </div>
 
-            <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500 font-medium">
-              <span className="truncate">Target: {isUnlocked ? formatINR(emergencyTargetVal) : '••••••'}</span>
+            <div className="mt-2 flex items-center justify-between text-[11px] text-[#78746B] dark:text-[#9E9B92] font-medium">
+              <span className="truncate">Target: {isContentUnlocked ? formatINR(emergencyTargetVal) : '••••••'}</span>
             </div>
           </div>
         </div>
@@ -1851,31 +2031,31 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
         {/* 3. LENT (Receivables) - Clean, prominent, standalone */}
         <div
           id="card-goals-lent"
-          className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between hover:border-purple-300 dark:hover:border-purple-700 transition-all"
+          className="bg-white dark:bg-[#161614] p-4 sm:p-5 rounded-2xl border border-[#E5E0D4] dark:border-[#282622] shadow-2xs flex flex-col justify-between hover:border-[#C5A059]/60 dark:hover:border-[#C5A059]/50 transition-all"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            <span className="text-[11px] font-semibold text-[#78746B] dark:text-[#9E9B92] uppercase tracking-wider">
               Lent (Receivable)
             </span>
-            <div className="w-8 h-8 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] text-[#8E7952] dark:text-[#C5A059] flex items-center justify-center">
               <ArrowUpRight className="w-4 h-4" />
             </div>
           </div>
 
           <div className="mt-3.5">
-            <div className="text-xl sm:text-2xl font-black text-purple-600 dark:text-purple-400 tracking-tight font-mono">
+            <div className="text-xl sm:text-2xl font-bold text-[#141412] dark:text-[#F6F5F0] tracking-tight font-display tabular-nums">
               {displayAmount(goalsStats.lent)}
             </div>
 
             {/* Visual Accent */}
-            <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full mt-2.5 overflow-hidden">
+            <div className="w-full h-1.5 bg-[#E5E0D4] dark:bg-[#282622] rounded-full mt-3 overflow-hidden">
               <div
                 style={{ width: goalsStats.lent > 0 ? '100%' : '0%' }}
-                className="bg-purple-500 h-full rounded-full transition-all duration-500"
+                className="bg-[#C5A059] h-full rounded-full transition-all duration-500"
               />
             </div>
 
-            <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium mt-2 truncate">
+            <p className="text-[11px] text-[#78746B] dark:text-[#9E9B92] font-medium mt-2 truncate">
               Money given to others / to collect
             </p>
           </div>
@@ -1884,71 +2064,71 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
         {/* 4. BORROWED (Payables) - Clean, prominent, standalone */}
         <div
           id="card-goals-borrowed"
-          className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between hover:border-rose-300 dark:hover:border-rose-700 transition-all"
+          className="bg-white dark:bg-[#161614] p-4 sm:p-5 rounded-2xl border border-[#E5E0D4] dark:border-[#282622] shadow-2xs flex flex-col justify-between hover:border-[#C5A059]/60 dark:hover:border-[#C5A059]/50 transition-all"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            <span className="text-[11px] font-semibold text-[#78746B] dark:text-[#9E9B92] uppercase tracking-wider">
               Borrowed (Payable)
             </span>
-            <div className="w-8 h-8 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] text-[#8E7952] dark:text-[#C5A059] flex items-center justify-center">
               <ArrowDownLeft className="w-4 h-4" />
             </div>
           </div>
 
           <div className="mt-3.5">
-            <div className="text-xl sm:text-2xl font-black text-rose-600 dark:text-rose-400 tracking-tight font-mono">
+            <div className="text-xl sm:text-2xl font-bold text-[#141412] dark:text-[#F6F5F0] tracking-tight font-display tabular-nums">
               {displayAmount(goalsStats.borrowed)}
             </div>
 
             {/* Visual Accent */}
-            <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full mt-2.5 overflow-hidden">
+            <div className="w-full h-1.5 bg-[#E5E0D4] dark:bg-[#282622] rounded-full mt-3 overflow-hidden">
               <div
                 style={{ width: goalsStats.borrowed > 0 ? '100%' : '0%' }}
-                className="bg-rose-500 h-full rounded-full transition-all duration-500"
+                className="bg-[#C5A059] h-full rounded-full transition-all duration-500"
               />
             </div>
 
-            <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium mt-2 truncate">
+            <p className="text-[11px] text-[#78746B] dark:text-[#9E9B92] font-medium mt-2 truncate">
               Money taken / to repay
             </p>
           </div>
         </div>
 
-        {/* 5. Total Capital Preserved - Shows percentage calculated from progress toward combined Savings + Emergency Fund targets */}
+        {/* 5. Total Capital Preserved */}
         <div
           id="card-goals-total-allocated"
-          className="col-span-1 sm:col-span-2 lg:col-span-1 xl:col-span-1 bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between hover:border-indigo-300 dark:hover:border-indigo-700 transition-all"
+          className="col-span-1 sm:col-span-2 lg:col-span-1 xl:col-span-1 bg-white dark:bg-[#161614] p-4 sm:p-5 rounded-2xl border border-[#E5E0D4] dark:border-[#282622] shadow-2xs flex flex-col justify-between hover:border-[#C5A059]/60 dark:hover:border-[#C5A059]/50 transition-all"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            <span className="text-[11px] font-semibold text-[#78746B] dark:text-[#9E9B92] uppercase tracking-wider">
               Capital Preserved
             </span>
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] text-[#8E7952] dark:text-[#C5A059] flex items-center justify-center">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
 
           <div className="mt-3.5">
             <div className="flex items-baseline justify-between gap-2">
-              <div className="text-xl sm:text-2xl font-black text-indigo-600 dark:text-indigo-400 tracking-tight font-mono">
+              <div className="text-xl sm:text-2xl font-bold text-[#141412] dark:text-[#F6F5F0] tracking-tight font-display tabular-nums">
                 {displayAmount(capitalPreservedProgress.combinedAchieved)}
               </div>
-              <span className="text-xs font-black px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80 shrink-0">
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#C5A059]/15 text-[#8E7952] dark:text-[#C5A059] border border-[#C5A059]/30 shrink-0">
                 {capitalPreservedProgress.percentage}%
               </span>
             </div>
 
             {/* Combined Target Progress Bar */}
-            <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full mt-2.5 overflow-hidden">
+            <div className="w-full h-1.5 bg-[#E5E0D4] dark:bg-[#282622] rounded-full mt-3 overflow-hidden">
               <div
                 style={{ width: `${capitalPreservedProgress.cappedPercentage}%` }}
-                className="bg-indigo-500 h-full rounded-full transition-all duration-500"
+                className="bg-[#C5A059] h-full rounded-full transition-all duration-500"
               />
             </div>
 
-            <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500 font-medium">
-              <span className="truncate">Combined: {isUnlocked ? formatINR(capitalPreservedProgress.combinedTarget) : '••••••'}</span>
-              <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 shrink-0 ml-1">
+            <div className="mt-2 flex items-center justify-between text-[11px] text-[#78746B] dark:text-[#9E9B92] font-medium">
+              <span className="truncate">Combined: {isContentUnlocked ? formatINR(capitalPreservedProgress.combinedTarget) : '••••••'}</span>
+              <span className="text-[10px] font-semibold text-[#8E7952] dark:text-[#C5A059] shrink-0 ml-1">
                 Savings + Emergency
               </span>
             </div>
@@ -1957,22 +2137,22 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
       </div>
 
       {/* 3. Visual Allocation Ratio & Progress Card */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs p-4 sm:p-5 transition-colors">
+      <div className="bg-white dark:bg-[#161614] rounded-2xl border border-[#E5E0D4] dark:border-[#282622] shadow-2xs p-4 sm:p-5 transition-colors">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-            <h3 className="text-xs font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wide">
+            <Sparkles className="w-4 h-4 text-[#8E7952] dark:text-[#C5A059]" />
+            <h3 className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] uppercase tracking-wider">
               Reserves Growth vs Financial Targets
             </h3>
           </div>
-          <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs font-semibold">
-            <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
-              <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-              Savings: {savingsProgress.percentage}% {isUnlocked ? `of ${formatINR(savingsTargetVal)}` : 'of ••••••'}
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs font-medium">
+            <span className="flex items-center gap-1.5 text-[#141412] dark:text-[#F6F5F0]">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#C5A059]" />
+              Savings: {savingsProgress.percentage}% {isContentUnlocked ? `of ${formatINR(savingsTargetVal)}` : 'of ••••••'}
             </span>
-            <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-              Emergency: {emergencyProgress.percentage}% {isUnlocked ? `of ${formatINR(emergencyTargetVal)}` : 'of ••••••'}
+            <span className="flex items-center gap-1.5 text-[#141412] dark:text-[#F6F5F0]">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#8E7952]" />
+              Emergency: {emergencyProgress.percentage}% {isContentUnlocked ? `of ${formatINR(emergencyTargetVal)}` : 'of ••••••'}
             </span>
           </div>
         </div>
@@ -1980,38 +2160,38 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
         {/* Dual Progress Bars */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
           {/* Savings bar */}
-          <div className="p-3 bg-slate-50/70 dark:bg-slate-800/40 rounded-xl border border-slate-200/80 dark:border-slate-800">
-            <div className="flex items-center justify-between text-xs mb-1.5">
-              <span className="font-bold text-slate-700 dark:text-slate-300">Savings Target Fulfillment</span>
-              <span className="font-extrabold text-blue-600 dark:text-blue-400">{savingsProgress.percentage}%</span>
+          <div className="p-3.5 bg-[#F6F5F0] dark:bg-[#22211D] rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25]">
+            <div className="flex items-center justify-between text-xs mb-2">
+              <span className="font-semibold text-[#141412] dark:text-[#F6F5F0]">Savings Target Fulfillment</span>
+              <span className="font-bold text-[#8E7952] dark:text-[#C5A059]">{savingsProgress.percentage}%</span>
             </div>
-            <div className="w-full h-2.5 bg-slate-200/80 dark:bg-slate-700 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-[#E5E0D4] dark:bg-[#2C2A25] rounded-full overflow-hidden">
               <div
                 style={{ width: `${savingsProgress.cappedPercentage}%` }}
-                className="bg-blue-500 h-full rounded-full transition-all duration-500"
+                className="bg-[#C5A059] h-full rounded-full transition-all duration-500"
               />
             </div>
-            <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 font-medium">
-              <span>{isUnlocked ? `${formatINR(goalsStats.savings)} achieved` : '•••••• achieved'}</span>
-              <span>{isUnlocked ? `${formatINR(savingsProgress.remaining)} remaining` : 'Target: ••••••'}</span>
+            <div className="flex items-center justify-between text-[11px] text-[#78746B] dark:text-[#9E9B92] mt-2 font-medium">
+              <span>{isContentUnlocked ? `${formatINR(goalsStats.savings)} achieved` : '•••••• achieved'}</span>
+              <span>{isContentUnlocked ? `${formatINR(savingsProgress.remaining)} remaining` : 'Target: ••••••'}</span>
             </div>
           </div>
 
           {/* Emergency Fund bar */}
-          <div className="p-3 bg-slate-50/70 dark:bg-slate-800/40 rounded-xl border border-slate-200/80 dark:border-slate-800">
-            <div className="flex items-center justify-between text-xs mb-1.5">
-              <span className="font-bold text-slate-700 dark:text-slate-300">Emergency Fund Fulfillment</span>
-              <span className="font-extrabold text-amber-600 dark:text-amber-400">{emergencyProgress.percentage}%</span>
+          <div className="p-3.5 bg-[#F6F5F0] dark:bg-[#22211D] rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25]">
+            <div className="flex items-center justify-between text-xs mb-2">
+              <span className="font-semibold text-[#141412] dark:text-[#F6F5F0]">Emergency Fund Fulfillment</span>
+              <span className="font-bold text-[#8E7952] dark:text-[#C5A059]">{emergencyProgress.percentage}%</span>
             </div>
-            <div className="w-full h-2.5 bg-slate-200/80 dark:bg-slate-700 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-[#E5E0D4] dark:bg-[#2C2A25] rounded-full overflow-hidden">
               <div
                 style={{ width: `${emergencyProgress.cappedPercentage}%` }}
-                className="bg-amber-500 h-full rounded-full transition-all duration-500"
+                className="bg-[#C5A059] h-full rounded-full transition-all duration-500"
               />
             </div>
-            <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 font-medium">
-              <span>{isUnlocked ? `${formatINR(goalsStats.emergencyFund)} achieved` : '•••••• achieved'}</span>
-              <span>{isUnlocked ? `${formatINR(emergencyProgress.remaining)} remaining` : 'Target: ••••••'}</span>
+            <div className="flex items-center justify-between text-[11px] text-[#78746B] dark:text-[#9E9B92] mt-2 font-medium">
+              <span>{isContentUnlocked ? `${formatINR(goalsStats.emergencyFund)} achieved` : '•••••• achieved'}</span>
+              <span>{isContentUnlocked ? `${formatINR(emergencyProgress.remaining)} remaining` : 'Target: ••••••'}</span>
             </div>
           </div>
         </div>
@@ -2020,15 +2200,15 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
       {/* 4. Goals Activity Table & List */}
       <div
         id="goals-activity-card"
-        className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden flex flex-col transition-colors"
+        className="bg-white dark:bg-[#161614] rounded-2xl border border-[#E5E0D4] dark:border-[#282622] shadow-2xs overflow-hidden flex flex-col transition-colors"
       >
         {/* Header & Controls */}
-        <div className="px-4 sm:px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-slate-50/60 dark:bg-slate-800/40">
+        <div className="px-4 sm:px-5 py-3.5 border-b border-[#EFECE4] dark:border-[#24231F] flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-[#F6F5F0]/60 dark:bg-[#1C1C19]">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-xs font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wide">
+            <h3 className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] uppercase tracking-wider">
               Goals Activity Log
             </h3>
-            <span className="text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+            <span className="text-[11px] font-medium text-[#78746B] dark:text-[#9E9B92]">
               ({filteredGoalsTransactions.length} entries in{' '}
               {timeframe === 'month'
                 ? formatMonthYear(selectedMonth)
@@ -2047,7 +2227,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                   type="button"
                   id="btn-goals-delete-selected"
                   onClick={handleTriggerBulkDelete}
-                  className="min-h-[40px] py-1.5 px-3 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white text-xs font-bold rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
+                  className="min-h-[40px] py-1.5 px-3 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white text-xs font-semibold rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
                 >
                   <Trash2 className="w-3.5 h-3.5 stroke-[2.5] shrink-0" />
                   <span>Delete Selected ({selectedCount})</span>
@@ -2055,7 +2235,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                 <button
                   type="button"
                   onClick={handleClearSelection}
-                  className="min-h-[40px] py-1.5 px-2 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                  className="min-h-[40px] py-1.5 px-2 text-xs font-medium text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-[#F6F5F0] transition-colors cursor-pointer"
                 >
                   Clear
                 </button>
@@ -2064,14 +2244,14 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
 
             {/* Search */}
             <div className="relative flex-1 sm:w-48 min-w-0">
-              <Search className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 absolute left-3 top-3 pointer-events-none" />
+              <Search className="w-3.5 h-3.5 text-[#78746B] dark:text-[#9E9B92] absolute left-3 top-3 pointer-events-none" />
               <input
                 type="text"
                 id="goals-search-input"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search category, note..."
-                className="w-full min-h-[40px] pl-8 pr-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-[#C5A059]"
+                className="w-full min-h-[40px] pl-8 pr-3 py-1.5 bg-white dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] rounded-xl text-xs text-[#141412] dark:text-[#F6F5F0] placeholder-[#78746B] dark:placeholder-[#9E9B92] focus:outline-none focus:border-[#C5A059]"
               />
             </div>
 
@@ -2080,7 +2260,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
               id="goals-filter-type"
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
-              className="w-full sm:w-auto min-h-[40px] py-1.5 px-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:border-[#C5A059] cursor-pointer"
+              className="w-full sm:w-auto min-h-[40px] py-1.5 px-2.5 bg-white dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] rounded-xl text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059] cursor-pointer"
             >
               <option value="ALL">All Reserves & Goals</option>
               <option value="Savings">Savings Only</option>
@@ -2107,19 +2287,19 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
 
         {/* Mobile Select All Bar */}
         {filteredGoalsTransactions.length > 0 && (
-          <div className="md:hidden px-4 py-2 bg-slate-100/80 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-            <label className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+          <div className="md:hidden px-4 py-2 bg-[#F6F5F0]/80 dark:bg-[#1E1E1B] border-b border-[#EFECE4] dark:border-[#24231F] flex items-center justify-between">
+            <label className="flex items-center gap-2 text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] cursor-pointer">
               <input
                 type="checkbox"
                 checked={isAllSelected}
                 onChange={handleToggleSelectAll}
-                className="w-4 h-4 text-indigo-600 rounded border-slate-300 dark:border-slate-700 focus:ring-indigo-500 cursor-pointer"
+                className="w-4 h-4 rounded border-[#E5E0D4] dark:border-[#2C2A25] accent-[#C5A059] cursor-pointer"
               />
               <span>Select All ({filteredGoalsTransactions.length})</span>
             </label>
 
             {selectedCount > 0 && (
-              <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
+              <span className="text-[11px] font-semibold text-[#8E7952] dark:text-[#C5A059]">
                 {selectedCount} selected
               </span>
             )}
@@ -2130,13 +2310,13 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
         {filteredGoalsTransactions.length === 0 ? (
           <div
             id="empty-goals-transactions"
-            className="py-12 flex flex-col items-center justify-center text-center bg-white dark:bg-slate-900 p-6"
+            className="py-14 flex flex-col items-center justify-center text-center bg-white dark:bg-[#161614] p-6"
           >
-            <div className="w-12 h-12 rounded-full bg-blue-50 dark:bg-blue-950/60 flex items-center justify-center text-blue-500 mb-3">
+            <div className="w-12 h-12 rounded-2xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] flex items-center justify-center text-[#8E7952] dark:text-[#C5A059] mb-3">
               <PiggyBank className="w-6 h-6" />
             </div>
-            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">No goals activity found</h4>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm">
+            <h4 className="text-sm font-semibold text-[#141412] dark:text-[#F6F5F0]">No goals activity found</h4>
+            <p className="text-xs text-[#78746B] dark:text-[#9E9B92] mt-1 max-w-sm">
               {timeframe === 'month'
                 ? `No savings, emergency fund, or lent/borrowed transactions for ${formatMonthYear(
                     selectedMonth
@@ -2149,7 +2329,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
               <button
                 type="button"
                 onClick={() => onOpenAddGoal('Savings')}
-                className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="mt-4 px-4 py-2.5 bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>Record Savings</span>
@@ -2161,19 +2341,19 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
             {/* Desktop Table View */}
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
-                <thead className="sticky top-0 bg-white dark:bg-slate-900 shadow-xs">
-                  <tr className="text-slate-400 dark:text-slate-500 uppercase font-bold text-[10px] tracking-wider border-b border-slate-100 dark:border-slate-800">
+                <thead className="sticky top-0 bg-[#F6F5F0]/60 dark:bg-[#1C1C19] shadow-2xs">
+                  <tr className="text-[#78746B] dark:text-[#9E9B92] uppercase font-semibold text-[10px] tracking-wider border-b border-[#EFECE4] dark:border-[#24231F]">
                     <th className="w-10 px-4 py-3 text-center">
                       <button
                         type="button"
                         onClick={handleToggleSelectAll}
                         title={isAllSelected ? 'Deselect all' : 'Select all'}
-                        className="p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 rounded transition-colors cursor-pointer inline-flex items-center justify-center"
+                        className="p-1 text-[#78746B] hover:text-[#C5A059] rounded transition-colors cursor-pointer inline-flex items-center justify-center"
                       >
                         {isAllSelected ? (
-                          <CheckSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                          <CheckSquare className="w-4 h-4 text-[#C5A059]" />
                         ) : isSomeSelected ? (
-                          <MinusSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                          <MinusSquare className="w-4 h-4 text-[#C5A059]" />
                         ) : (
                           <Square className="w-4 h-4" />
                         )}
@@ -2189,7 +2369,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                     )}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50 dark:divide-slate-800/60">
+                <tbody className="divide-y divide-[#EFECE4] dark:divide-[#24231F]">
                   {filteredGoalsTransactions.map((tx) => {
                     const style = getTypeStyle(tx);
                     const isSelected = tx.rowIndex !== undefined && selectedRowIndices.has(tx.rowIndex);
@@ -2199,8 +2379,8 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                         key={tx.id || `${tx.date}-${tx.amount}-${tx.rowIndex}`}
                         className={`transition-colors group ${
                           isSelected
-                            ? 'bg-indigo-50/70 dark:bg-indigo-950/40'
-                            : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/50'
+                            ? 'bg-[#C5A059]/10 dark:bg-[#C5A059]/15'
+                            : 'hover:bg-[#F6F5F0]/60 dark:hover:bg-[#22211D]'
                         }`}
                       >
                         <td className="w-10 px-4 py-3 text-center">
@@ -2212,13 +2392,13 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                                 handleToggleSelectRow(tx.rowIndex);
                               }
                             }}
-                            className="w-4 h-4 text-indigo-600 rounded border-slate-300 dark:border-slate-700 focus:ring-indigo-500 cursor-pointer"
+                            className="w-4 h-4 rounded border-[#E5E0D4] dark:border-[#2C2A25] accent-[#C5A059] cursor-pointer"
                           />
                         </td>
-                        <td className="px-4 py-3 text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                        <td className="px-4 py-3 text-[#78746B] dark:text-[#9E9B92] whitespace-nowrap">
                           {formatDate(tx.date)}
                         </td>
-                        <td className="px-4 py-3 font-semibold text-slate-900 dark:text-slate-100">{tx.category}</td>
+                        <td className="px-4 py-3 font-semibold text-[#141412] dark:text-[#F6F5F0]">{tx.category}</td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span
                             className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md border text-[11px] font-bold ${style.badgeBg}`}
@@ -2227,10 +2407,10 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                             {style.label}
                           </span>
                         </td>
-                        <td className="px-4 py-3 italic text-slate-400 dark:text-slate-500 text-[11px] max-w-xs truncate">
-                          {tx.description || <span className="not-italic text-slate-300 dark:text-slate-600">—</span>}
+                        <td className="px-4 py-3 italic text-[#78746B] dark:text-[#9E9B92] text-[11px] max-w-xs truncate">
+                          {tx.description || <span className="not-italic opacity-40">—</span>}
                         </td>
-                        <td className={`px-5 py-3 text-right font-bold text-xs ${style.textColor} whitespace-nowrap font-mono`}>
+                        <td className="px-5 py-3 text-right font-semibold text-xs text-[#141412] dark:text-[#F6F5F0] whitespace-nowrap font-display tabular-nums">
                           {displayAmount(tx.amount)}
                         </td>
                         {(onDeleteTransaction || onDeleteTransactionsBatch) && (
@@ -2239,7 +2419,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                               type="button"
                               title="Delete entry from Google Sheet"
                               onClick={() => handleTriggerSingleDelete(tx)}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60 rounded-md transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                              className="p-1.5 text-[#78746B] hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60 rounded-md transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -2253,7 +2433,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
             </div>
 
             {/* Mobile Card View */}
-            <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800">
+            <div className="md:hidden divide-y divide-[#EFECE4] dark:divide-[#24231F]">
               {filteredGoalsTransactions.map((tx) => {
                 const style = getTypeStyle(tx);
                 const isSelected = tx.rowIndex !== undefined && selectedRowIndices.has(tx.rowIndex);
@@ -2263,8 +2443,8 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                     key={tx.id || `${tx.date}-${tx.amount}-${tx.rowIndex}`}
                     className={`p-3.5 flex items-center justify-between gap-2 transition-colors ${
                       isSelected
-                        ? 'bg-indigo-50/70 dark:bg-indigo-950/40'
-                        : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
+                        ? 'bg-[#C5A059]/10 dark:bg-[#C5A059]/15'
+                        : 'hover:bg-[#F6F5F0]/60 dark:hover:bg-[#22211D]'
                     }`}
                   >
                     <div className="shrink-0">
@@ -2276,7 +2456,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                             handleToggleSelectRow(tx.rowIndex);
                           }
                         }}
-                        className="w-4 h-4 text-indigo-600 rounded border-slate-300 dark:border-slate-700 focus:ring-indigo-500 cursor-pointer"
+                        className="w-4 h-4 rounded border-[#E5E0D4] dark:border-[#2C2A25] accent-[#C5A059] cursor-pointer"
                       />
                     </div>
 
@@ -2288,11 +2468,11 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                           {style.icon}
                           {style.label}
                         </span>
-                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+                        <span className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] truncate">
                           {tx.category}
                         </span>
                       </div>
-                      <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 flex items-center gap-2">
+                      <div className="text-[11px] text-[#78746B] dark:text-[#9E9B92] mt-1 flex items-center gap-2">
                         <span>{formatDate(tx.date)}</span>
                         {tx.description && (
                           <>
@@ -2304,7 +2484,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      <div className={`text-sm font-extrabold ${style.textColor} font-mono`}>
+                      <div className="text-sm font-semibold text-[#141412] dark:text-[#F6F5F0] font-display tabular-nums">
                         {displayAmount(tx.amount)}
                       </div>
 
@@ -2312,7 +2492,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                         <button
                           type="button"
                           onClick={() => handleTriggerSingleDelete(tx)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md transition-colors"
+                          className="p-1.5 text-[#78746B] hover:text-rose-600 rounded-md transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

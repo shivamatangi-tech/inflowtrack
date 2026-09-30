@@ -237,6 +237,136 @@ export async function loginWithEmailPassword(
 }
 
 /**
+ * Register a new user with a unique Username and PIN using secure PBKDF2 hashing.
+ */
+export async function registerWithUsernameAndPin(
+  username: string,
+  pin: string,
+  displayName?: string,
+  password?: string,
+  rememberMe = true
+): Promise<{ user: GoogleUser; token: string }> {
+  const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  if (!cleanUsername || cleanUsername.length < 3) {
+    throw new Error('Username must be at least 3 characters long (letters, numbers, underscore, hyphen).');
+  }
+  const cleanPin = pin.trim();
+  if (!cleanPin || cleanPin.length < 4) {
+    throw new Error('Please choose a 4-digit PIN for instant access.');
+  }
+
+  const res = await fetch('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: cleanUsername,
+      pin: cleanPin,
+      password: password || undefined,
+      displayName: displayName?.trim() || cleanUsername,
+    }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Registration failed. Please try a different username.');
+  }
+
+  const user: GoogleUser = {
+    uid: data.user.uid,
+    email: data.user.email,
+    username: data.user.username || cleanUsername,
+    displayName: data.user.displayName || displayName || cleanUsername,
+    photoURL: data.user.photoURL || null,
+    authProvider: data.user.authProvider || 'personal',
+  };
+
+  cachedToken = data.token;
+  cachedUser = user;
+
+  try {
+    if (rememberMe) {
+      localStorage.setItem('inflowtrack_saved_username', cleanUsername);
+      localStorage.setItem('inflowtrack_easy_pin_enabled', 'true');
+    }
+  } catch {
+    // Ignore storage issues
+  }
+
+  return { user, token: data.token };
+}
+
+/**
+ * Sign in directly using unique Username and 4-digit PIN.
+ */
+export async function loginWithUsernameAndPin(
+  username: string,
+  pin: string,
+  rememberMe = true
+): Promise<{ user: GoogleUser; token: string }> {
+  const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  if (!cleanUsername) {
+    throw new Error('Please enter your username.');
+  }
+  const cleanPin = pin.trim();
+  if (!cleanPin || cleanPin.length < 4) {
+    throw new Error('Please enter your 4-digit PIN.');
+  }
+
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: cleanUsername,
+      pin: cleanPin,
+    }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Incorrect username or PIN. Please check your credentials.');
+  }
+
+  const user: GoogleUser = {
+    uid: data.user.uid,
+    email: data.user.email,
+    username: data.user.username || cleanUsername,
+    displayName: data.user.displayName || cleanUsername,
+    photoURL: data.user.photoURL || null,
+    authProvider: data.user.authProvider || 'personal',
+  };
+
+  cachedToken = data.token;
+  cachedUser = user;
+
+  try {
+    if (rememberMe) {
+      localStorage.setItem('inflowtrack_saved_username', cleanUsername);
+      localStorage.setItem('inflowtrack_easy_pin_enabled', 'true');
+    }
+  } catch {
+    // Ignore storage issues
+  }
+
+  return { user, token: data.token };
+}
+
+/**
+ * Check if a username is available in the database.
+ */
+export async function checkUsernameAvailability(username: string): Promise<boolean> {
+  const clean = username.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  if (!clean || clean.length < 3) return false;
+  try {
+    const res = await fetch(`/api/auth/check-username?username=${encodeURIComponent(clean)}`);
+    if (!res.ok) return false;
+    const data = await res.json();
+    return Boolean(data.available);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Sign in using an Easy 4-digit PIN configured in Settings for this Firebase account.
  */
 export async function loginWithPin(

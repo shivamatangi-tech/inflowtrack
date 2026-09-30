@@ -738,6 +738,8 @@ export default function App() {
                   onDeleteTransaction={handleDeleteTransaction}
                   onDeleteTransactionsBatch={handleDeleteTransactionsBatch}
                   isUnlocked={isUnlocked}
+                  onUnlockSuccess={() => setIsUnlocked(true)}
+                  onLock={() => setIsUnlocked(false)}
                 />
               </motion.div>
             )}
@@ -943,6 +945,8 @@ export default function App() {
                   onDeleteTransaction={handleDeleteTransaction}
                   onDeleteTransactionsBatch={handleDeleteTransactionsBatch}
                   isUnlocked={isUnlocked}
+                  onUnlockSuccess={() => setIsUnlocked(true)}
+                  onLock={() => setIsUnlocked(false)}
                 />
               </motion.div>
             )}
