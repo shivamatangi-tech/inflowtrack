@@ -48,6 +48,7 @@ import {
   getCategoryIcon,
   TopUpWithdrawIconBadge,
 } from '../utils/categoryIcons';
+import { getAllVaultCards } from '../utils/customCards';
 
 interface EditTransactionModalProps {
   isOpen: boolean;
@@ -97,7 +98,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   const paymentModesList = React.useMemo(() => {
     const list =
       categories.paymentModes && categories.paymentModes.length > 0
-        ? categories.paymentModes
+        ? [...categories.paymentModes]
         : [
             'HDFC Bank',
             'Kotak 811',
@@ -110,6 +111,18 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
             'Cash',
             'Other Payment Mode',
           ];
+
+    const cardNames = getAllVaultCards().map((c) => c.name);
+    cardNames.forEach((name) => {
+      if (!list.some((m) => m.toLowerCase() === name.toLowerCase())) {
+        const otherIdx = list.indexOf('Other Payment Mode');
+        if (otherIdx >= 0) {
+          list.splice(otherIdx, 0, name);
+        } else {
+          list.push(name);
+        }
+      }
+    });
 
     if (transaction?.paymentMode && !list.includes(transaction.paymentMode)) {
       return [...list, transaction.paymentMode];

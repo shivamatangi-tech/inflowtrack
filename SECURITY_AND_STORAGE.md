@@ -19,9 +19,10 @@ This document details the storage locations, encryption/hashing standards, and a
 
 ## 2. Authentication & Credential Verification
 
-### Unique Username Architecture
-- Users register with a unique, normalized username (3-30 characters: lowercase letters `a-z`, numbers `0-9`, underscores `_`, hyphens `-`).
-- The backend checks uniqueness during registration via `GET /api/auth/check-username` and server-side conflict verification.
+### Username or Email ID Authentication Flexibility
+- Users can sign in using either their unique Username or their registered Email ID alongside their 4-digit PIN or account password.
+- Registration assigns a unique, normalized username (3-30 characters: lowercase letters `a-z`, numbers `0-9`, underscores `_`, hyphens `-`).
+- The backend resolves either identifier dynamically and checks uniqueness during registration via `GET /api/auth/check-username`.
 - Passwords and PINs are **never stored as plain text in Firebase or the database**.
 
 ### PBKDF2-HMAC-SHA256 Hashing Standard
@@ -56,9 +57,88 @@ Once authenticated with the user's PIN, the management interface allows:
 
 ---
 
-## 4. Database Persistence
+## 4. Database Persistence & Real-Time 2-Way Google Sheets Sync
 
-All updates are immediately persisted to:
-1. **Server Database**: `.data/financeflow_workbook.json` via authenticated endpoints `POST /api/cards`, `PUT /api/cards`, and `DELETE /api/cards/:id`.
-2. **Cloud Spreadsheet**: Mirrored to the user's connected private Google Sheet.
-3. **Local Cache**: Saved in browser `localStorage` for instant responsive rendering and offline capability.
+inflotrack features true bidirectional 2-way synchronization between the application and Google Sheets:
+
+### 1. Website to Google Sheets (Instant Reflection)
+- Whenever a transaction is created, updated, or deleted on the web app, the backend immediately modifies the appropriate Month tab (e.g. `MAR_2026`, `APR_2026`, etc.) in the connected Google Sheet via Google Sheets REST API v4 / Apps Script bridge.
+- Whenever a card is created, updated (including UPI ID and QR code), or deleted in the PIN-authenticated card editor, the `Cards` tab in the user's private Google Sheet is updated synchronously.
+- Categories, budgets, and savings goals are immediately mirrored into the `Categories`, `Budgets`, and `SavingsGoals` tabs.
+
+### 2. Google Sheets to Website (Live Background Sync)
+- If the user modifies transaction amounts, categories, dates, or card details directly inside Google Sheets on their phone, desktop, or tablet:
+  - **Window Focus Pull**: When the user switches back to the inflotrack tab, the app automatically triggers a refresh from Google Sheets.
+  - **Periodic Background Polling**: While the app is active, it runs an automatic poll every 30 seconds to fetch changes made remotely in Google Sheets.
+  - **Manual Sync**: Clicking the "Sync" button in the navigation header triggers an immediate bidirectional reconciliation with Google Sheets.
+
+---
+
+## 5. Complete Application Flow: Start to End
+
+```
+                                  [ User Accesses inflotrack ]
+                                                │
+                                                ▼
+                                    ┌───────────────────────┐
+                                    │    Authentication     │
+                                    │  Screen (AuthScreen)  │
+                                    └───────────┬───────────┘
+                                                │
+                     ┌──────────────────────────┴──────────────────────────┐
+                     │                                                     │
+                     ▼                                                     ▼
+           [ User Registration ]                                   [ User Sign In ]
+   • Enter unique Username                                 • Enter unique Username
+   • Choose 4-digit PIN                                    • Enter 4-digit PIN
+   • Optional Display Name & Password                      • Verified against PBKDF2-HMAC-SHA256
+   • PBKDF2-HMAC-SHA256 salted hash created                • Secure Auth Token issued
+   • NEVER stored in plaintext in DB/Firebase              • Session saved securely
+                     │                                                     │
+                     └──────────────────────────┬──────────────────────────┘
+                                                │
+                                                ▼
+                                   ┌─────────────────────────┐
+                                   │ Google Sheets Discovery │
+                                   │  & Initial Sync Check   │
+                                   └────────────┬────────────┘
+                                                │
+                                                ▼
+                                   ┌─────────────────────────┐
+                                   │    Main Application     │
+                                   │ Dashboard, Cards, Goals │
+                                   └────────────┬────────────┘
+                                                │
+        ┌───────────────────────────────────────┼───────────────────────────────────────┐
+        │                                       │                                       │
+        ▼                                       ▼                                       ▼
+┌───────────────┐                       ┌───────────────┐                       ┌───────────────┐
+│ Card & Vault  │                       │ Transactions  │                       │  2-Way Sheets │
+│  Management   │                       │   Management  │                       │ Synchronization│
+└───────┬───────┘                       └───────┬───────┘                       └───────┬───────┘
+        │                                       │                                       │
+• Single "Edit Card" button             • Add Transaction:                      • Web -> Sheet:
+• Requires 4-digit PIN auth               Income, Expense, Transfer,              Instant write on
+• Once verified, user can:                Lent, Borrowed with live totals         every mutation
+  - Edit card details (16 digits,       • Edit Transaction:                     • Sheet -> Web:
+    bank, expiry, CVV, theme)             Ownership verified, live row update     Polls every 30s +
+  - Edit UPI ID on card back            • Delete Transaction:                     refreshes on tab
+  - Add / auto-generate QR                Batch or single with confirm            focus
+  - Permanently delete card             • Dynamic payment modes from            • Manual "Sync" button
+• Persists to DB & Cards tab              active vault cards                      in Header for on-
+  in Google Sheets                                                                demand refresh
+        │                                       │                                       │
+        └───────────────────────────────────────┼───────────────────────────────────────┘
+                                                │
+                                                ▼
+                                   ┌─────────────────────────┐
+                                   │ Inactivity & Session    │
+                                   │       Protection        │
+                                   └────────────┬────────────┘
+                                                │
+                                 • Tracks user mouse, touch & keys
+                                 • Auto-locks balances with PIN after
+                                   configured idle minutes
+                                 • Auto-signs out on extended idle
+                                 • Safe sign-out clears sensitive memory
+```

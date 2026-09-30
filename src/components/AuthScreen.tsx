@@ -28,6 +28,7 @@ import {
   PieChart,
   KeyRound,
   User,
+  Mail,
   Lock,
   UserPlus,
   LogIn,
@@ -62,7 +63,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     try {
       return (
         localStorage.getItem('inflowtrack_saved_username') ||
-        localStorage.getItem('inflowtrack_saved_email')?.split('@')[0] ||
+        localStorage.getItem('inflowtrack_saved_email') ||
         ''
       );
     } catch {
@@ -71,6 +72,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   })();
 
   const [mode, setMode] = useState<AuthMode>('signin');
+  const [loginOption, setLoginOption] = useState<'username' | 'email'>(() =>
+    savedUsername.includes('@') ? 'email' : 'username'
+  );
   const [username, setUsername] = useState<string>(savedUsername);
   const [pin, setPin] = useState<string>('');
   const [confirmPin, setConfirmPin] = useState<string>('');
@@ -114,9 +118,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setLocalError(null);
     setSuccessMessage(null);
 
-    const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    if (!cleanUsername) {
-      setLocalError('Please enter your unique username.');
+    const clean = username.trim().toLowerCase();
+    const cleanIdentifier = clean.includes('@')
+      ? clean.replace(/[^a-z0-9_@.\+-]/g, '')
+      : clean.replace(/[^a-z0-9_-]/g, '');
+
+    if (!cleanIdentifier) {
+      setLocalError(
+        loginOption === 'email'
+          ? 'Please enter your email ID.'
+          : 'Please enter your username.'
+      );
       return;
     }
 
@@ -127,11 +139,19 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       }
       setIsSubmitting(true);
       try {
-        const emailFallback = cleanUsername.includes('@') ? cleanUsername : `${cleanUsername}@inflowtrack.app`;
+        const emailFallback = cleanIdentifier.includes('@')
+          ? cleanIdentifier
+          : `${cleanIdentifier}@inflowtrack.app`;
         const authResult = await loginWithEmailPassword(emailFallback, password, rememberMe);
         if (rememberMe) {
           try {
-            localStorage.setItem('inflowtrack_saved_username', cleanUsername);
+            if (cleanIdentifier.includes('@')) {
+              localStorage.setItem('inflowtrack_saved_email', cleanIdentifier);
+              localStorage.removeItem('inflowtrack_saved_username');
+            } else {
+              localStorage.setItem('inflowtrack_saved_username', cleanIdentifier);
+              localStorage.removeItem('inflowtrack_saved_email');
+            }
           } catch {
             // Ignore
           }
@@ -155,12 +175,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
     setIsSubmitting(true);
     try {
-      const authResult = await loginWithUsernameAndPin(cleanUsername, cleanPin, rememberMe);
+      const authResult = await loginWithUsernameAndPin(cleanIdentifier, cleanPin, rememberMe);
       if (onAuthSuccess) {
         await onAuthSuccess(authResult.user, authResult.token);
       }
     } catch (err: any) {
-      setLocalError(err.message || 'Incorrect username or PIN. Please check your credentials.');
+      setLocalError(
+        err.message ||
+          (loginOption === 'email'
+            ? 'Incorrect email ID or PIN. Please check your credentials.'
+            : 'Incorrect username or PIN. Please check your credentials.')
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -270,7 +295,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             </h1>
             <p className="text-xs text-[#78756E] dark:text-[#9C9990] mt-1.5 leading-relaxed">
               {mode === 'signin'
-                ? 'Sign in using your unique username and 4-digit PIN.'
+                ? 'Sign in using your username or email ID and 4-digit PIN.'
                 : 'Choose a unique username and 4-digit PIN for instant access.'}
             </p>
           </div>
@@ -301,14 +326,56 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
           {/* Form */}
           <form onSubmit={handleFormSubmit} className="space-y-4">
-            {/* Username Input Field (Required for both login and register) */}
+            {/* Login Option: Username or Email ID Option Selector */}
+            {mode === 'signin' && (
+              <div className="flex p-1 bg-[#F2EFE8] dark:bg-[#252420] rounded-xl border border-[#E2DDD3] dark:border-[#2E2C27]">
+                <button
+                  type="button"
+                  id="btn-login-option-username"
+                  onClick={() => {
+                    setLoginOption('username');
+                    setLocalError(null);
+                  }}
+                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    loginOption === 'username'
+                      ? 'bg-white dark:bg-[#181816] text-[#181816] dark:text-white shadow-xs'
+                      : 'text-[#78756E] dark:text-[#9C9990] hover:text-[#181816] dark:hover:text-white'
+                  }`}
+                >
+                  <User className="w-3.5 h-3.5" />
+                  <span>Username</span>
+                </button>
+                <button
+                  type="button"
+                  id="btn-login-option-email"
+                  onClick={() => {
+                    setLoginOption('email');
+                    setLocalError(null);
+                  }}
+                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    loginOption === 'email'
+                      ? 'bg-white dark:bg-[#181816] text-[#181816] dark:text-white shadow-xs'
+                      : 'text-[#78756E] dark:text-[#9C9990] hover:text-[#181816] dark:hover:text-white'
+                  }`}
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  <span>Email ID</span>
+                </button>
+              </div>
+            )}
+
+            {/* Username or Email ID Input Field */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label
                   htmlFor="auth-username"
                   className="block text-xs font-semibold text-[#5E5B52] dark:text-[#A39F95]"
                 >
-                  Unique Username
+                  {mode === 'signin'
+                    ? loginOption === 'email'
+                      ? 'Email ID'
+                      : 'Username'
+                    : 'Unique Username'}
                 </label>
                 {mode === 'register' && (
                   <span className="text-[10px] text-[#78756E] dark:text-[#9C9990]">
@@ -318,22 +385,35 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               </div>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#78756E] dark:text-[#9C9990]">
-                  <User className="w-4 h-4" />
+                  {mode === 'signin' && (loginOption === 'email' || username.includes('@')) ? (
+                    <Mail className="w-4 h-4 text-[#C5A059]" />
+                  ) : (
+                    <User className="w-4 h-4" />
+                  )}
                 </div>
                 <input
                   id="auth-username"
-                  type="text"
+                  type={mode === 'signin' && (loginOption === 'email' || username.includes('@')) ? 'email' : 'text'}
                   required
                   autoCapitalize="none"
                   autoCorrect="off"
-                  autoComplete="username"
+                  autoComplete={mode === 'signin' ? (loginOption === 'email' ? 'email' : 'username') : 'username'}
                   value={username}
                   onChange={(e) => {
-                    setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''));
+                    const val = e.target.value;
+                    if (mode === 'signin') {
+                      const cleaned = val.toLowerCase().replace(/[^a-z0-9_@.\+-]/g, '');
+                      setUsername(cleaned);
+                      if (cleaned.includes('@') && loginOption !== 'email') {
+                        setLoginOption('email');
+                      }
+                    } else {
+                      setUsername(val.toLowerCase().replace(/[^a-z0-9_-]/g, ''));
+                    }
                     setLocalError(null);
                   }}
-                  placeholder="e.g. shiva_06"
-                  className="w-full pl-9 pr-3.5 py-2.5 text-sm bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E0DCD3] dark:border-[#2F2E29] rounded-xl focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:ring-2 focus:ring-[#C5A059] text-[#181816] dark:text-white placeholder:text-[#9E9B92] transition-all font-mono"
+                  placeholder=""
+                  className="w-full pl-9 pr-3.5 py-2.5 text-sm bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E0DCD3] dark:border-[#2F2E29] rounded-xl focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:ring-2 focus:ring-[#C5A059] text-[#181816] dark:text-white transition-all font-mono"
                 />
               </div>
             </div>
@@ -353,8 +433,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   autoComplete="name"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="Your Name (e.g. Shiva Matangi)"
-                  className="w-full px-3.5 py-2.5 text-sm bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E0DCD3] dark:border-[#2F2E29] rounded-xl focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:ring-2 focus:ring-[#C5A059] text-[#181816] dark:text-white placeholder:text-[#9E9B92] transition-all"
+                  placeholder=""
+                  className="w-full px-3.5 py-2.5 text-sm bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E0DCD3] dark:border-[#2F2E29] rounded-xl focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:ring-2 focus:ring-[#C5A059] text-[#181816] dark:text-white transition-all"
                 />
               </div>
             )}
@@ -510,10 +590,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       setPassword(e.target.value);
                       setLocalError(null);
                     }}
-                    placeholder={
-                      mode === 'register' ? 'At least 6 characters (or leave empty)' : 'Enter password'
-                    }
-                    className="w-full pl-3.5 pr-10 py-2.5 text-sm bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E0DCD3] dark:border-[#2F2E29] rounded-xl focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:ring-2 focus:ring-[#C5A059] text-[#181816] dark:text-white placeholder:text-[#9E9B92] transition-all"
+                    placeholder=""
+                    className="w-full pl-3.5 pr-10 py-2.5 text-sm bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E0DCD3] dark:border-[#2F2E29] rounded-xl focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:ring-2 focus:ring-[#C5A059] text-[#181816] dark:text-white transition-all"
                   />
                   <button
                     type="button"
@@ -537,7 +615,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   onChange={(e) => setRememberMe(e.target.checked)}
                   className="w-4 h-4 rounded border-[#C7C3B8] text-[#181816] focus:ring-[#C5A059] cursor-pointer"
                 />
-                <span>Remember my username on this device</span>
+                <span>Remember my login on this device</span>
               </label>
             </div>
 
@@ -617,10 +695,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           <div className="p-2.5 rounded-xl bg-white/60 dark:bg-[#1A1A18]/60 border border-[#E5E2DA]/80 dark:border-[#2C2A26]/80 flex flex-col items-center">
             <User className="w-4 h-4 text-[#C5A059] mb-1" />
             <span className="text-[11px] font-semibold text-[#181816] dark:text-white">
-              Unique Username
+              Username or Email
             </span>
             <span className="text-[9.5px] text-[#78756E] dark:text-[#9C9990] mt-0.5">
-              Personal ID
+              Flexible Login
             </span>
           </div>
 

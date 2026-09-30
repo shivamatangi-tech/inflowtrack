@@ -60,6 +60,8 @@ export interface Transaction {
   description: string; // Notes
   createdAt?: string; // ISO timestamp
   updatedAt?: string; // ISO timestamp
+  deletedAt?: string | null; // ISO timestamp when soft deleted
+  isDeleted?: boolean; // Soft delete flag
 }
 
 export interface SecurityQuestionConfig {

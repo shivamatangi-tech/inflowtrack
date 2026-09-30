@@ -1,12 +1,12 @@
 {
-  "spreadsheetId": "16EK4cClivUdioakJdvBokYrFHzKWIekRqc2u535u0mg",
+  "spreadsheetId": "1vvrKr8DceWAlt7Dn-k10mIiPQlyDRHqxZggmH-oKOQA",
   "spreadsheetName": "inflowtrack",
   "primaryOwnerUid": "3lncspQXV3aBhLQzrz5yCtcR0cm2",
   "nextRowCounter": 3,
   "transactions": [
     {
       "rowIndex": 2,
-      "sheetName": "SEP_2026",
+      "sheetName": "sept-2026",
       "date": "2026-09-26",
       "time": "21:29",
       "type": "Income",
@@ -120,8 +120,8 @@
   "userSecurity": {
     "3lncspQXV3aBhLQzrz5yCtcR0cm2": {
       "uid": "3lncspQXV3aBhLQzrz5yCtcR0cm2",
-      "pinEnabled": false,
-      "pinSaltedHash": "",
+      "pinEnabled": true,
+      "pinSaltedHash": "pbkdf2_sha256$100000$5bf713f430f70bdb094cf774a130ebed$cfdb610d2bb6d7878aa275273f8ca390422760c5a3641e0a5bd0882f9a920751",
       "question1": "What is your primary bank name or secret recovery keyword?",
       "answer1SaltedHash": "",
       "question2": "",
@@ -129,7 +129,10 @@
       "inactivityTimeoutMinutes": 15,
       "inactivityAction": "lock",
       "failedAttempts": 0,
-      "updatedAt": "2026-09-26T18:00:28.947Z"
+      "updatedAt": "2026-09-30T02:42:44.823Z",
+      "pinLoginEnabled": true,
+      "pinLoginEncryptedPassword": "62962cceb2057cc1fe8d2cc1:9841c3c2fbb72ab6f7428def182779b2:00562132c6f691f31c2e9f",
+      "pinLoginEmail": "shivamatangi.tech@gmail.com"
     }
   },
   "userBudgets": {
@@ -150,7 +153,7 @@
       "spreadsheetId": "16EK4cClivUdioakJdvBokYrFHzKWIekRqc2u535u0mg",
       "spreadsheetName": "inflowtrack",
       "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/16EK4cClivUdioakJdvBokYrFHzKWIekRqc2u535u0mg/edit",
-      "updatedAt": "2026-09-26T18:08:00.000Z"
+      "updatedAt": "2026-09-30T02:43:44.644Z"
     }
   },
   "recurringTemplates": [
@@ -203,5 +206,99 @@
       "updatedAt": "2026-09-26T16:51:36.628Z"
     }
   ],
-  "driveBackups": []
+  "driveBackups": [],
+  "userCards": {
+    "3lncspQXV3aBhLQzrz5yCtcR0cm2": [
+      {
+        "id": "card-vault-primary",
+        "name": "inflotrack Sovereign Vault",
+        "cardType": "Debit",
+        "prefix4": "4532",
+        "middleDigits": "8841 9200",
+        "last4": "6789",
+        "expiry": "09/29",
+        "network": "VISA",
+        "tier": "Infinite",
+        "theme": "obsidian",
+        "upiId": "inflotrack.vault@okaxis",
+        "cvv": "842",
+        "isDefault": true
+      },
+      {
+        "id": "card-hdfc-debit",
+        "name": "HDFC Salary Debit Card",
+        "cardType": "Debit",
+        "prefix4": "4532",
+        "middleDigits": "9120 4018",
+        "last4": "4129",
+        "expiry": "05/29",
+        "network": "VISA",
+        "tier": "Platinum",
+        "theme": "navy",
+        "upiId": "salary.hdfc@upi",
+        "cvv": "319",
+        "isDefault": true
+      },
+      {
+        "id": "card-hdfc-cc",
+        "name": "HDFC Credit Card",
+        "cardType": "Credit",
+        "prefix4": "5412",
+        "middleDigits": "7531 4092",
+        "last4": "3904",
+        "expiry": "11/28",
+        "network": "Mastercard",
+        "tier": "Signature",
+        "theme": "champagne",
+        "upiId": "hdfc.rewards@hdfcbank",
+        "cvv": "592",
+        "isDefault": true
+      },
+      {
+        "id": "card-sbi-cc",
+        "name": "SBI Credit Card",
+        "cardType": "Credit",
+        "prefix4": "4111",
+        "middleDigits": "6209 1845",
+        "last4": "8421",
+        "expiry": "06/28",
+        "network": "VISA",
+        "tier": "Platinum",
+        "theme": "navy",
+        "upiId": "sbi.card@okhdfcbank",
+        "cvv": "108",
+        "isDefault": true
+      },
+      {
+        "id": "card-tata-neu",
+        "name": "Tata Neu Credit Card",
+        "cardType": "Credit",
+        "prefix4": "6521",
+        "middleDigits": "9034 5112",
+        "last4": "7710",
+        "expiry": "03/29",
+        "network": "RuPay",
+        "tier": "Select",
+        "theme": "espresso",
+        "upiId": "tataneu.rewards@icici",
+        "cvv": "741",
+        "isDefault": true
+      },
+      {
+        "id": "card-amazon-icici",
+        "name": "Amazon ICICI",
+        "cardType": "Credit",
+        "prefix4": "4908",
+        "middleDigits": "3410 8872",
+        "last4": "1156",
+        "expiry": "08/28",
+        "network": "VISA",
+        "tier": "Platinum",
+        "theme": "platinum",
+        "upiId": "amazonpay.icici@apl",
+        "cvv": "663",
+        "isDefault": true
+      }
+    ]
+  }
 }

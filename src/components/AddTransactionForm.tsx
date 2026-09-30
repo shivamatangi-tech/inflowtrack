@@ -31,7 +31,7 @@ import {
   getTransactionTypeIcon,
   TopUpWithdrawIconBadge,
 } from '../utils/categoryIcons';
-import { getStoredCustomCards } from '../utils/customCards';
+import { getAllVaultCards } from '../utils/customCards';
 
 interface AddTransactionFormProps {
   categories: CategoryData;
@@ -133,7 +133,7 @@ export const AddTransactionForm: React.FC<AddTransactionFormProps> = ({
             'Cash',
             'Other Payment Mode',
           ];
-    const customNames = getStoredCustomCards().map((c) => c.name);
+    const customNames = getAllVaultCards().map((c) => c.name);
     const merged = [...base];
     customNames.forEach((name) => {
       if (!merged.some((m) => m.toLowerCase() === name.toLowerCase())) {

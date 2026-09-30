@@ -75,7 +75,7 @@ const SESSION_SECRET =
   })();
 
 // Server-side Google Sheets & Drive configuration (NEVER exposed to client)
-const GOOGLE_SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || '';
+const GOOGLE_SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || '1vvrKr8DceWAlt7Dn-k10mIiPQlyDRHqxZggmH-oKOQA';
 const GOOGLE_SPREADSHEET_NAME = process.env.GOOGLE_SPREADSHEET_NAME || 'inflowtrack';
 const GOOGLE_DRIVE_FOLDER_NAME = process.env.GOOGLE_DRIVE_FOLDER_NAME || 'inflowtrack';
 const GOOGLE_DRIVE_FOLDER_ID =
@@ -621,10 +621,13 @@ interface StoredTransactionRow {
   transactionId: string;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
+  isDeleted?: boolean;
 }
 
 interface UserSecurityRecord {
   uid: string;
+  username?: string;
   pinEnabled: boolean;
   pinSaltedHash: string; // pbkdf2_sha256$100000$salt$hash (NEVER plaintext)
   pinLoginEnabled?: boolean;
@@ -865,16 +868,99 @@ function parseDriveFolderIdFromInput(rawInput?: string): { folderId: string; fol
   };
 }
 
-function getMonthSheetName(rawDate?: string): string {
-  if (rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
-    const parts = rawDate.split('-');
-    const monthIdx = parseInt(parts[1], 10) - 1;
-    if (monthIdx >= 0 && monthIdx < 12) {
-      return `${MONTH_NAMES[monthIdx]}_${parts[0]}`;
+const SHORT_MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+const MONTHLY_SHEET_HEADERS = [
+  'record_id',
+  'date',
+  'time',
+  'type',
+  'category',
+  'subcategory',
+  'amount',
+  'payment_mode',
+  'account',
+  'description',
+  'user_id',
+  'created_at',
+  'updated_at',
+  'deleted_at',
+  'is_deleted',
+];
+
+/**
+ * Returns canonical month sheet name in 'mmm-yyyy' format.
+ * Requirement: For September, uses 'sept-YYYY' (e.g. 'sept-2026'); for October 'oct-YYYY', etc.
+ */
+function getCanonicalMonthSheetName(rawDate?: string): string {
+  let year = new Date().getFullYear();
+  let monthIndex = new Date().getMonth();
+
+  if (rawDate) {
+    const norm = normalizeSheetDate(rawDate);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(norm)) {
+      const parts = norm.split('-');
+      year = parseInt(parts[0], 10);
+      monthIndex = parseInt(parts[1], 10) - 1;
     }
   }
-  const now = new Date();
-  return `${MONTH_NAMES[now.getMonth()]}_${now.getFullYear()}`;
+
+  if (monthIndex < 0 || monthIndex > 11 || isNaN(monthIndex) || isNaN(year)) {
+    const now = new Date();
+    year = now.getFullYear();
+    monthIndex = now.getMonth();
+  }
+
+  const monthAbbr = monthIndex === 8 ? 'sept' : SHORT_MONTH_NAMES[monthIndex];
+  return `${monthAbbr}-${year}`;
+}
+
+function getMonthSheetName(rawDate?: string): string {
+  return getCanonicalMonthSheetName(rawDate);
+}
+
+function isMonthlySheetTab(title: string): boolean {
+  const clean = title.trim().toLowerCase();
+  return /^(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[\-_]\d{4}$/.test(clean);
+}
+
+function resolveMatchingMonthSheetTitle(existingSheetTitles: string[], rawDate?: string): string {
+  let year = new Date().getFullYear();
+  let monthIndex = new Date().getMonth();
+
+  if (rawDate) {
+    const norm = normalizeSheetDate(rawDate);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(norm)) {
+      const parts = norm.split('-');
+      year = parseInt(parts[0], 10);
+      monthIndex = parseInt(parts[1], 10) - 1;
+    }
+  }
+
+  const aliases: string[] = [];
+  if (monthIndex === 8) {
+    aliases.push(`sept-${year}`, `sep-${year}`, `sept_${year}`, `sep_${year}`);
+  } else if (monthIndex >= 0 && monthIndex <= 11) {
+    const m = SHORT_MONTH_NAMES[monthIndex];
+    aliases.push(`${m}-${year}`, `${m}_${year}`);
+  }
+
+  for (const alias of aliases) {
+    const match = existingSheetTitles.find((title) => title.trim().toLowerCase() === alias.toLowerCase());
+    if (match) return match;
+  }
+
+  return getCanonicalMonthSheetName(rawDate);
+}
+
+function getColumnIndexMap(headerRow: string[]): Record<string, number> {
+  const map: Record<string, number> = {};
+  if (!Array.isArray(headerRow)) return map;
+  headerRow.forEach((col, idx) => {
+    const key = String(col || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (key) map[key] = idx;
+  });
+  return map;
 }
 
 function formatDateToDDMMYYYY(dateStr: string): string {
@@ -1225,7 +1311,7 @@ async function populateFullWorkbookToLiveSheet(
     });
   }
 
-  const requiredTabs = [...Array.from(monthTabsSet), 'Categories', 'Summary'];
+  const requiredTabs = [...Array.from(monthTabsSet), 'Categories', 'Cards', 'Summary'];
   const addSheetRequests: any[] = [];
   for (const tabName of requiredTabs) {
     const hasTab = Array.from(existingTitles).some((t) => t.toUpperCase() === tabName.toUpperCase());
@@ -1346,6 +1432,57 @@ async function populateFullWorkbookToLiveSheet(
     ).catch(() => {});
   }
 
+  // Write Cards tab (Payment cards, UPI IDs, and QR code configurations)
+  const userCards = wb.userCards?.[uid] || [];
+  if (userCards.length > 0) {
+    const cardHeaders = [
+      'Card ID',
+      'Card Name',
+      'Card Type',
+      'Prefix 4',
+      'Middle Digits',
+      'Last 4',
+      'Expiry (MM/YY)',
+      'Network',
+      'Tier',
+      'Theme Finish',
+      'UPI ID',
+      'QR Code Data',
+      'CVV',
+      'Updated At',
+    ];
+    const cardRows = [
+      cardHeaders,
+      ...userCards.map((c) => [
+        c.id,
+        c.name,
+        c.cardType || 'Debit',
+        c.prefix4 || '4532',
+        c.middleDigits || '8841 9200',
+        c.last4 || '1234',
+        c.expiry || '12/29',
+        c.network || 'VISA',
+        c.tier || 'Signature',
+        c.theme || 'obsidian',
+        c.upiId || '',
+        c.qrCodeData || '',
+        c.cvv || '842',
+        c.updatedAt || new Date().toISOString(),
+      ]),
+    ];
+    await fetch(
+      `${SHEETS_BASE_URL}/${spreadsheetId}/values/Cards!A1:N${cardRows.length}?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ values: cardRows }),
+      }
+    ).catch(() => {});
+  }
+
   // Write Summary & Budgets tab
   const budgets = wb.userBudgets[uid];
   const driveCfg = wb.userDriveConfigs[uid];
@@ -1370,6 +1507,109 @@ async function populateFullWorkbookToLiveSheet(
       body: JSON.stringify({ values: summaryRows }),
     }
   ).catch(() => {});
+}
+
+/**
+ * Synchronizes the user's payment cards, UPI IDs, and QR codes to the 'Cards' tab
+ * in their private Google Sheet database for true 2-way synchronization.
+ */
+async function syncCardsToLiveGoogleSheet(
+  wb: WorkbookStore,
+  uid: string,
+  userGoogleToken?: string
+): Promise<void> {
+  if (!isGoogleCloudConfigured(userGoogleToken)) return;
+  try {
+    const driveCfg = wb.userDriveConfigs?.[uid];
+    const accessToken = await getServerGoogleAccessToken(userGoogleToken);
+    const spreadsheetId = await resolveTargetSpreadsheetId(accessToken, {
+      driveFolderId: driveCfg?.driveFolderId,
+      spreadsheetName: driveCfg?.spreadsheetName,
+      existingSpreadsheetId: driveCfg?.spreadsheetId,
+    });
+    if (!spreadsheetId) return;
+
+    const userCards = wb.userCards?.[uid] || [];
+    const cardHeaders = [
+      'Card ID',
+      'Card Name',
+      'Card Type',
+      'Prefix 4',
+      'Middle Digits',
+      'Last 4',
+      'Expiry (MM/YY)',
+      'Network',
+      'Tier',
+      'Theme Finish',
+      'UPI ID',
+      'QR Code Data',
+      'CVV',
+      'Updated At',
+    ];
+    const values = [
+      cardHeaders,
+      ...userCards.map((c) => [
+        c.id,
+        c.name,
+        c.cardType || 'Debit',
+        c.prefix4 || '4532',
+        c.middleDigits || '8841 9200',
+        c.last4 || '1234',
+        c.expiry || '12/29',
+        c.network || 'VISA',
+        c.tier || 'Signature',
+        c.theme || 'obsidian',
+        c.upiId || '',
+        c.qrCodeData || '',
+        c.cvv || '842',
+        c.updatedAt || new Date().toISOString(),
+      ]),
+    ];
+
+    // Ensure Cards tab exists in the spreadsheet
+    const metaRes = await fetch(`${SHEETS_BASE_URL}/${spreadsheetId}?fields=sheets(properties(sheetId,title))`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (metaRes.ok) {
+      const metaData = await metaRes.json();
+      const hasCardsTab = (metaData.sheets || []).some(
+        (s: any) => s.properties?.title?.toUpperCase() === 'CARDS'
+      );
+      if (!hasCardsTab) {
+        await fetch(`${SHEETS_BASE_URL}/${spreadsheetId}:batchUpdate`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            requests: [
+              {
+                addSheet: {
+                  properties: { title: 'Cards', gridProperties: { frozenRowCount: 1 } },
+                },
+              },
+            ],
+          }),
+        }).catch(() => {});
+      }
+    }
+
+    // Write updated card rows to Cards tab
+    await fetch(
+      `${SHEETS_BASE_URL}/${spreadsheetId}/values/Cards!A1:N${Math.max(values.length, 25)}?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ values }),
+      }
+    ).catch(() => {});
+  } catch {
+    // Offline or network fallback
+  }
 }
 
 async function syncFromLiveGoogleSheetsIfConfigured(
@@ -1510,6 +1750,52 @@ async function syncFromLiveGoogleSheetsIfConfigured(
       // If the newly created Google Sheet in Drive is empty, push existing user transactions into it
       await populateFullWorkbookToLiveSheet(accessToken, spreadsheetId, wb, uid);
       saveWorkbook(wb);
+    }
+
+    // 2-Way Sync: Read Cards tab from Google Sheets if user edited card info, UPI IDs, or QR codes in Google Sheets
+    const hasCardsSheet = allSheets.some((s) => s.title.toUpperCase() === 'CARDS');
+    if (hasCardsSheet) {
+      try {
+        const cardsUrl = `${SHEETS_BASE_URL}/${spreadsheetId}/values/Cards!A2:N?valueRenderOption=FORMATTED_VALUE`;
+        const cardsRes = await fetch(cardsUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (cardsRes.ok) {
+          const cardsData = await cardsRes.json();
+          const cardRows: string[][] = cardsData.values || [];
+          if (cardRows.length > 0) {
+            const parsedCards: StoredVaultCard[] = cardRows
+              .filter((r) => r[0] && r[1])
+              .map((r) => ({
+                id: String(r[0] || '').trim(),
+                name: String(r[1] || '').trim(),
+                cardType: String(r[2] || 'Debit').trim() === 'Credit' ? 'Credit' : 'Debit',
+                prefix4: String(r[3] || '4532').replace(/\D/g, '').slice(0, 4).padEnd(4, '4'),
+                middleDigits: String(r[4] || '8841 9200').trim(),
+                last4: String(r[5] || '1234').replace(/\D/g, '').slice(-4).padStart(4, '0'),
+                expiry: String(r[6] || '12/29').trim(),
+                network: ['VISA', 'Mastercard', 'RuPay', 'AMEX'].includes(String(r[7] || '').trim())
+                  ? (String(r[7] || '').trim() as any)
+                  : 'VISA',
+                tier: String(r[8] || 'Signature').trim(),
+                theme: ['obsidian', 'champagne', 'navy', 'platinum', 'espresso'].includes(String(r[9] || '').trim())
+                  ? (String(r[9] || '').trim() as any)
+                  : 'obsidian',
+                upiId: String(r[10] || '').trim(),
+                qrCodeData: String(r[11] || '').trim(),
+                cvv: String(r[12] || '842').replace(/\D/g, '').slice(0, 4),
+                updatedAt: String(r[13] || new Date().toISOString()).trim(),
+              }));
+            if (parsedCards.length > 0) {
+              if (!wb.userCards) wb.userCards = {};
+              wb.userCards[uid] = parsedCards;
+              saveWorkbook(wb);
+            }
+          }
+        }
+      } catch {
+        // Continue if Cards tab reading encounters an error
+      }
     }
   } catch {
     // Fallback to local workbook mirror if network/credentials unavailable
@@ -2032,7 +2318,7 @@ async function startServer() {
       const cleanPass = String(password || '');
 
       if (!rawId) {
-        res.status(400).json({ error: 'Please enter your username.' });
+        res.status(400).json({ error: 'Please enter your username or email ID.' });
         return;
       }
       if (!cleanPin && !cleanPass) {
@@ -2051,7 +2337,7 @@ async function startServer() {
       );
 
       if (!user) {
-        res.status(401).json({ error: 'No account found with this username. Please check your username or register.' });
+        res.status(401).json({ error: 'No account found with this username or email ID. Please check your credentials or register.' });
         return;
       }
 
@@ -2459,7 +2745,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/cards', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  app.post('/api/cards', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const uid = req.user!.uid;
       const wb = loadWorkbook();
@@ -2504,13 +2790,16 @@ async function startServer() {
       wb.userCards[uid] = existingCards;
       saveWorkbook(wb);
 
+      // Real-time 2-Way Sync with Google Sheets
+      await syncCardsToLiveGoogleSheet(wb, uid, req.googleAccessToken);
+
       res.json({ success: true, card: sanitizedCard, cards: existingCards });
     } catch {
       res.status(500).json({ error: 'Failed to save card details.' });
     }
   });
 
-  app.put('/api/cards', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  app.put('/api/cards', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const uid = req.user!.uid;
       const wb = loadWorkbook();
@@ -2526,13 +2815,16 @@ async function startServer() {
       wb.userCards[uid] = cards;
       saveWorkbook(wb);
 
+      // Real-time 2-Way Sync with Google Sheets
+      await syncCardsToLiveGoogleSheet(wb, uid, req.googleAccessToken);
+
       res.json({ success: true, cards });
     } catch {
       res.status(500).json({ error: 'Failed to update cards.' });
     }
   });
 
-  app.delete('/api/cards/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  app.delete('/api/cards/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const uid = req.user!.uid;
       const { id } = req.params;
@@ -2545,7 +2837,10 @@ async function startServer() {
       wb.userCards[uid] = updated;
       saveWorkbook(wb);
 
-      res.json({ success: true, message: 'Card removed successfully from database.', cards: updated });
+      // Real-time 2-Way Sync with Google Sheets
+      await syncCardsToLiveGoogleSheet(wb, uid, req.googleAccessToken);
+
+      res.json({ success: true, message: 'Card removed successfully from database and Google Sheets.', cards: updated });
     } catch {
       res.status(500).json({ error: 'Failed to delete card.' });
     }

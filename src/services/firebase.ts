@@ -296,16 +296,20 @@ export async function registerWithUsernameAndPin(
 }
 
 /**
- * Sign in directly using unique Username and 4-digit PIN.
+ * Sign in directly using unique Username or Email ID and 4-digit PIN.
  */
 export async function loginWithUsernameAndPin(
-  username: string,
+  usernameOrEmail: string,
   pin: string,
   rememberMe = true
 ): Promise<{ user: GoogleUser; token: string }> {
-  const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-  if (!cleanUsername) {
-    throw new Error('Please enter your username.');
+  const clean = usernameOrEmail.trim().toLowerCase();
+  const cleanIdentifier = clean.includes('@')
+    ? clean.replace(/[^a-z0-9_@.\+-]/g, '')
+    : clean.replace(/[^a-z0-9_-]/g, '');
+
+  if (!cleanIdentifier) {
+    throw new Error('Please enter your username or email ID.');
   }
   const cleanPin = pin.trim();
   if (!cleanPin || cleanPin.length < 4) {
@@ -316,21 +320,23 @@ export async function loginWithUsernameAndPin(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      username: cleanUsername,
+      username: cleanIdentifier,
+      identifier: cleanIdentifier,
+      email: cleanIdentifier.includes('@') ? cleanIdentifier : undefined,
       pin: cleanPin,
     }),
   });
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.error || 'Incorrect username or PIN. Please check your credentials.');
+    throw new Error(data.error || 'Incorrect username/email or PIN. Please check your credentials.');
   }
 
   const user: GoogleUser = {
     uid: data.user.uid,
     email: data.user.email,
-    username: data.user.username || cleanUsername,
-    displayName: data.user.displayName || cleanUsername,
+    username: data.user.username || cleanIdentifier,
+    displayName: data.user.displayName || cleanIdentifier,
     photoURL: data.user.photoURL || null,
     authProvider: data.user.authProvider || 'personal',
   };
@@ -340,7 +346,7 @@ export async function loginWithUsernameAndPin(
 
   try {
     if (rememberMe) {
-      localStorage.setItem('inflowtrack_saved_username', cleanUsername);
+      localStorage.setItem('inflowtrack_saved_username', cleanIdentifier);
       localStorage.setItem('inflowtrack_easy_pin_enabled', 'true');
     }
   } catch {

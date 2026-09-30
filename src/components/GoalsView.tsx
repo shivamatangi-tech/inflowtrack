@@ -49,6 +49,7 @@ import {
   Copy,
   RotateCw,
   Wallet,
+  AlertCircle,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -402,7 +403,6 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
   const [vaultCards, setVaultCards] = useState<VaultCardItem[]>(() => getAllVaultCards());
   const [activeCardIndex, setActiveCardIndex] = useState<number>(0);
   const [swipeDirection, setSwipeDirection] = useState<number>(1);
-  const [isAddCardOpen, setIsAddCardOpen] = useState<boolean>(false);
   const [isCardFlipped, setIsCardFlipped] = useState<boolean>(false);
   const [copiedUpi, setCopiedUpi] = useState<boolean>(false);
   const [cardFilterType, setCardFilterType] = useState<'ALL' | 'Debit' | 'Credit'>('ALL');
@@ -414,7 +414,16 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
     setTimeout(() => setCopiedUpi(false), 2000);
   };
 
-  // PIN Authorization Modal state for editing & unlocking cards
+  // --------------------------------------------------------------------------
+  // MANDATORY SECURITY ARCHITECTURE: PIN Authorization for Card Management
+  // 1. Single "Edit Card" button for the entire card section.
+  // 2. PIN authentication is strictly required before opening the card editor.
+  // 3. Authenticated session unlocks options to:
+  //    - Edit card details (numbers, bank, expiry, network, tier, finish).
+  //    - Edit the UPI ID displayed on the back of the card.
+  //    - Add or edit QR code (with live NPCI preview).
+  //    - Delete the card (with double confirmation).
+  // --------------------------------------------------------------------------
   const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
   const [pinInput, setPinInput] = useState<string>('');
   const [newPinConfirm, setNewPinConfirm] = useState<string>('');
@@ -423,17 +432,6 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
   const [isSettingUpPin, setIsSettingUpPin] = useState<boolean>(false);
   const [pendingCardToEdit, setPendingCardToEdit] = useState<VaultCardItem | null>(null);
   const [showPinText, setShowPinText] = useState<boolean>(false);
-
-  // Add New Card Form state
-  const [newCardName, setNewCardName] = useState('');
-  const [newCardType, setNewCardType] = useState<CardType>('Debit');
-  const [newCardLast4, setNewCardLast4] = useState('');
-  const [newCardExpiry, setNewCardExpiry] = useState('12/29');
-  const [newCardNetwork, setNewCardNetwork] = useState<CardNetwork>('VISA');
-  const [newCardTier, setNewCardTier] = useState('Signature');
-  const [newCardTheme, setNewCardTheme] = useState<CardThemeFinish>('obsidian');
-  const [newCardUpi, setNewCardUpi] = useState('');
-  const [addCardError, setAddCardError] = useState<string | null>(null);
 
   // Edit Card Form state (PIN verified first; allows editing details, UPI ID, QR code, and deletion)
   const [isEditCardOpen, setIsEditCardOpen] = useState<boolean>(false);
@@ -578,6 +576,25 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
     }
   };
 
+  const handleStartAddNewCard = () => {
+    setEditingCardId('new');
+    setEditCardName('');
+    setEditCardType('Debit');
+    setEditCardPrefix4('4532');
+    setEditCardMiddleDigits('8841 9200');
+    setEditCardLast4('');
+    setEditCardExpiry('12/29');
+    setEditCardNetwork('VISA');
+    setEditCardTier('Signature');
+    setEditCardTheme('obsidian');
+    setEditCardUpi('');
+    setEditCardQrCodeData('');
+    setEditCardCvv('842');
+    setEditCardError(null);
+    setEditCardSuccess(null);
+    setIsDeleteCardConfirmOpen(false);
+  };
+
   const handleOpenEditCard = (card: VaultCardItem) => {
     setEditingCardId(card.id);
     setEditCardName(card.name);
@@ -615,13 +632,14 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
     const cleanMiddle = editCardMiddleDigits.trim() || '8841 9200';
     const cleanExpiry = editCardExpiry.trim() || '12/29';
     const cleanUpi = editCardUpi.trim();
-    const cleanQr = editCardQrCodeData.trim();
+    const cleanQr = editCardQrCodeData.trim() || (cleanUpi ? `upi://pay?pa=${cleanUpi}&pn=${encodeURIComponent(cleanName)}&cu=INR` : '');
     const cleanCvv = editCardCvv.replace(/\D/g, '').slice(0, 4) || '842';
 
     setIsSavingCard(true);
     try {
+      const cardId = editingCardId === 'new' ? `custom-card-${Date.now()}` : editingCardId;
       const updatedCard: VaultCardItem = {
-        id: editingCardId,
+        id: cardId,
         name: cleanName,
         cardType: editCardType,
         last4: cleanLast4,
@@ -639,11 +657,12 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
       const token = await getFreshAuthToken();
       const updatedList = await saveCardToServer(updatedCard, token || undefined);
       setVaultCards(updatedList);
-      setEditCardSuccess('Card details, UPI ID, and QR code saved securely to database!');
+      setEditingCardId(cardId);
+      setEditCardSuccess('Card details, UPI ID, and QR code saved securely to database and Google Sheets!');
       setTimeout(() => {
         setIsEditCardOpen(false);
         setEditCardSuccess(null);
-      }, 750);
+      }, 850);
     } catch (err: any) {
       setEditCardError(err.message || 'Failed to save card changes.');
     } finally {
@@ -652,14 +671,15 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
   };
 
   const handleDeleteCard = async () => {
-    if (!editingCardId) return;
+    if (!editingCardId || editingCardId === 'new') return;
     setIsSavingCard(true);
+    setEditCardError(null);
     try {
       const token = await getFreshAuthToken();
       const updatedList = await deleteCardFromServer(editingCardId, token || undefined);
       setVaultCards(updatedList);
       setIsDeleteCardConfirmOpen(false);
-      setEditCardSuccess('Card deleted successfully from vault database.');
+      setEditCardSuccess('Card deleted successfully from database and Google Sheets.');
       setTimeout(() => {
         if (updatedList.length > 0) {
           handleOpenEditCard(updatedList[0]);
@@ -668,53 +688,12 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
           setIsEditCardOpen(false);
           setEditCardSuccess(null);
         }
-      }, 700);
+      }, 750);
     } catch (err: any) {
       setEditCardError(err.message || 'Failed to delete card.');
     } finally {
       setIsSavingCard(false);
     }
-  };
-
-  const handleAddCardSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAddCardError(null);
-
-    const cleanName = newCardName.trim();
-    if (!cleanName) {
-      setAddCardError('Please enter a card or bank name.');
-      return;
-    }
-
-    const cleanLast4 = newCardLast4.replace(/\D/g, '').slice(-4).padStart(4, '8');
-    const cleanExpiry = newCardExpiry.trim() || '12/29';
-    const prefixMap: Record<CardNetwork, string> = {
-      VISA: '4532',
-      Mastercard: '5412',
-      RuPay: '6521',
-      AMEX: '3782',
-    };
-
-    const updated = addCustomVaultCard({
-      name: cleanName,
-      cardType: newCardType,
-      last4: cleanLast4,
-      prefix4: prefixMap[newCardNetwork] || '4532',
-      expiry: cleanExpiry,
-      network: newCardNetwork,
-      tier: newCardTier.trim() || 'Platinum',
-      theme: newCardTheme,
-      upiId: newCardUpi.trim() || `${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '')}@upi`,
-      cvv: '842',
-    });
-
-    setVaultCards(updated);
-    setSwipeDirection(1);
-    setActiveCardIndex(updated.length - 1);
-    setNewCardName('');
-    setNewCardLast4('');
-    setNewCardExpiry('12/29');
-    setIsAddCardOpen(false);
   };
 
   // Separate Debit Cards and Credit Cards for distinct sections in the selector
@@ -791,24 +770,11 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                 type="button"
                 id="btn-open-edit-card-modal"
                 onClick={() => handleRequestEditCard(activeCard)}
-                title="Edit card details"
-                className="min-h-[42px] px-3.5 py-2 rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] bg-[#F6F5F0] hover:bg-[#EFECE4] dark:bg-[#22211D] dark:hover:bg-[#2C2A25] text-[#141412] dark:text-[#F6F5F0] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs"
+                title="Edit and manage all card details, UPI IDs, QR codes, and deletion (PIN Protected)"
+                className="min-h-[42px] px-4 py-2 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs"
               >
-                <Edit3 className="w-3.5 h-3.5 text-[#C5A059] shrink-0" />
-                <span>Edit</span>
-              </button>
-
-              <button
-                type="button"
-                id="btn-open-add-card-modal"
-                onClick={() => {
-                  setAddCardError(null);
-                  setIsAddCardOpen(true);
-                }}
-                className="min-h-[42px] px-3.5 py-2 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs"
-              >
-                <Plus className="w-3.5 h-3.5 stroke-[2.5] shrink-0" />
-                <span>Add</span>
+                <Edit3 className="w-3.5 h-3.5 shrink-0" />
+                <span>Edit Card</span>
               </button>
             </div>
           </div>
@@ -1132,18 +1098,9 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                id="btn-open-add-card-from-selector"
-                onClick={() => {
-                  setAddCardError(null);
-                  setIsAddCardOpen(true);
-                }}
-                className="min-h-[42px] px-3.5 py-2 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-xs font-semibold text-[#F6F5F0] dark:text-[#111110] flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-2xs"
-              >
-                <Plus className="w-3.5 h-3.5 stroke-[2.4]" />
-                <span>Add Card</span>
-              </button>
+              <span className="text-xs font-medium text-[#8E7952] dark:text-[#C5A059] px-3 py-1.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25]">
+                {vaultCards.length} Cards in Deck
+              </span>
             </div>
           </div>
 
@@ -1209,17 +1166,6 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                             Tap to focus
                           </span>
                         )}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRequestEditCard(card);
-                          }}
-                          title="Edit card details"
-                          className="w-7 h-7 rounded-lg bg-white/80 dark:bg-[#282622] hover:bg-[#E5E0D4] dark:hover:bg-[#34322C] text-[#78746B] hover:text-[#141412] dark:hover:text-[#F6F5F0] flex items-center justify-center transition-colors cursor-pointer"
-                        >
-                          <Edit3 className="w-3.5 h-3.5 text-[#C5A059]" />
-                        </button>
                       </div>
                     </div>
                   );
@@ -1288,17 +1234,6 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                             Tap to focus
                           </span>
                         )}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRequestEditCard(card);
-                          }}
-                          title="Edit card details"
-                          className="w-7 h-7 rounded-lg bg-white/80 dark:bg-[#282622] hover:bg-[#E5E0D4] dark:hover:bg-[#34322C] text-[#78746B] hover:text-[#141412] dark:hover:text-[#F6F5F0] flex items-center justify-center transition-colors cursor-pointer"
-                        >
-                          <Edit3 className="w-3.5 h-3.5 text-[#C5A059]" />
-                        </button>
                       </div>
                     </div>
                   );
@@ -1309,225 +1244,128 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
         </div>
       </div>
 
-      {/* Add New Card Modal */}
-      {isAddCardOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
-          <div
-            id="add-vault-card-modal"
-            className="bg-white dark:bg-[#161614] rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 border border-[#E5E0D4] dark:border-[#282622] shadow-2xl relative"
-          >
-            <button
-              type="button"
-              onClick={() => setIsAddCardOpen(false)}
-              className="absolute top-3.5 right-3.5 w-9 h-9 rounded-full bg-[#F6F5F0] dark:bg-[#22211D] text-[#78746B] hover:text-[#141412] dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <p className="text-[10px] font-medium tracking-[0.16em] uppercase text-[#8E7952] dark:text-[#C5A059] pr-8">
-              Private Vault Configuration
-            </p>
-            <h3 className="font-display text-xl sm:text-2xl font-semibold text-[#141412] dark:text-[#F6F5F0] mt-0.5 mb-4 pr-8">
-              Add Card to Swipe Deck
-            </h3>
-
-            {addCardError && (
-              <div className="mb-3 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
-                {addCardError}
-              </div>
-            )}
-
-            <form onSubmit={handleAddCardSubmit} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
-                  Card or Bank Name
-                </label>
-                <input
-                  type="text"
-                  value={newCardName}
-                  onChange={(e) => setNewCardName(e.target.value)}
-                  placeholder="e.g., Axis Magnus, Amex Platinum, ICICI Sapphiro"
-                  className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
-                  autoFocus
-                />
-              </div>
-
-              <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
-                    Last 4 Digits
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={4}
-                    value={newCardLast4}
-                    onChange={(e) => setNewCardLast4(e.target.value.replace(/\D/g, ''))}
-                    placeholder="8842"
-                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium tabular-nums text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
-                    Valid Thru (MM/YY)
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={5}
-                    value={newCardExpiry}
-                    onChange={(e) => setNewCardExpiry(e.target.value)}
-                    placeholder="12/29"
-                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium tabular-nums text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
-                    Card Network
-                  </label>
-                  <select
-                    value={newCardNetwork}
-                    onChange={(e) => setNewCardNetwork(e.target.value as CardNetwork)}
-                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059] cursor-pointer"
-                  >
-                    <option value="VISA">VISA</option>
-                    <option value="Mastercard">Mastercard</option>
-                    <option value="RuPay">RuPay</option>
-                    <option value="AMEX">AMEX</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
-                    Card Tier
-                  </label>
-                  <input
-                    type="text"
-                    value={newCardTier}
-                    onChange={(e) => setNewCardTier(e.target.value)}
-                    placeholder="Signature / Infinite"
-                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1.5">
-                  Card Finish
-                </label>
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                  {(
-                    [
-                      { id: 'obsidian', label: 'Obsidian', swatch: 'bg-[#191917]' },
-                      { id: 'champagne', label: 'Gold', swatch: 'bg-[#C5A059]' },
-                      { id: 'navy', label: 'Navy', swatch: 'bg-[#1E293B]' },
-                      { id: 'espresso', label: 'Espresso', swatch: 'bg-[#3B2A22]' },
-                      { id: 'platinum', label: 'Platinum', swatch: 'bg-[#CFCBC2]' },
-                    ] as const
-                  ).map((finish) => (
-                    <button
-                      key={finish.id}
-                      type="button"
-                      onClick={() => setNewCardTheme(finish.id)}
-                      className={`p-2 rounded-xl border flex flex-col items-center gap-1 text-[10px] font-medium transition-all cursor-pointer ${
-                        newCardTheme === finish.id
-                          ? 'border-[#C5A059] bg-[#F6F5F0] dark:bg-[#22211D] text-[#141412] dark:text-[#F6F5F0]'
-                          : 'border-[#E5E0D4] dark:border-[#282622] text-[#78746B] dark:text-[#9E9B92]'
-                      }`}
-                    >
-                      <span className={`w-5 h-5 rounded-full ${finish.swatch} border border-white/20`} />
-                      <span>{finish.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-2 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAddCardOpen(false)}
-                  className="min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] hover:text-[#141412] dark:hover:text-white transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold transition-all cursor-pointer"
-                >
-                  Save Card to Deck
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Card Details Modal (No password required; deletion disabled) */}
+      {/* Comprehensive Authenticated Card Management Modal (Protected by PIN) */}
       {isEditCardOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
           <div
             id="edit-vault-card-modal"
-            className="bg-white dark:bg-[#161614] rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 border border-[#E5E0D4] dark:border-[#282622] shadow-2xl relative"
+            className="bg-white dark:bg-[#161614] rounded-2xl max-w-lg w-full max-h-[92vh] overflow-y-auto p-4 sm:p-6 border border-[#E5E0D4] dark:border-[#282622] shadow-2xl relative"
           >
             <button
               type="button"
-              onClick={() => setIsEditCardOpen(false)}
+              onClick={() => {
+                setIsEditCardOpen(false);
+                setIsDeleteCardConfirmOpen(false);
+                setEditCardError(null);
+                setEditCardSuccess(null);
+              }}
               className="absolute top-3.5 right-3.5 w-9 h-9 rounded-full bg-[#F6F5F0] dark:bg-[#22211D] text-[#78746B] hover:text-[#141412] dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
 
+            {/* Top Badges */}
             <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[#C5A059]/15 text-[#8E7952] dark:text-[#C5A059] border border-[#C5A059]/30">
                 <Unlock className="w-3 h-3" />
-                PIN Verified · Details Unlocked
+                PIN Authenticated
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[#F6F5F0] dark:bg-[#22211D] text-[#5E5B52] dark:text-[#A39F95] border border-[#E5E0D4] dark:border-[#2C2A25]">
-                <Unlock className="w-3 h-3" />
-                No Account Password Needed
-              </span>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[#F6F5F0] dark:bg-[#22211D] text-[#8E7952] dark:text-[#C5A059] border border-[#E5E0D4] dark:border-[#2C2A25]">
                 <ShieldCheck className="w-3 h-3" />
-                Card Deletion Disabled
+                Database &amp; Google Sheets 2-Way Sync
               </span>
             </div>
 
             <h3 className="font-display text-xl sm:text-2xl font-semibold text-[#141412] dark:text-[#F6F5F0] mt-1 mb-1 pr-8">
-              Edit Card Details
+              {editingCardId === 'new' ? 'Add New Vault Card' : 'Manage Vault Card & Credentials'}
             </h3>
             <p className="text-xs text-[#78746B] dark:text-[#9E9B92] mb-4">
-              Your card details are unlocked with your PIN. Modify numbers, expiry, network, or visual finishes freely without entering your account password. Card deletion is permanently disabled to safeguard your transaction history.
+              Authenticated with your 4-digit PIN. Modify card numbers, visual finishes, UPI payment IDs, and QR codes, or permanently delete cards from your database.
             </p>
 
+            {/* Single Card Switcher: Select Any Card or Add New */}
+            <div className="mb-4 p-3 rounded-xl bg-[#F6F5F0] dark:bg-[#1E1E1B] border border-[#E5E0D4] dark:border-[#2C2A25] space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0]">
+                  Select Card to Manage
+                </label>
+                <button
+                  type="button"
+                  onClick={handleStartAddNewCard}
+                  className="text-xs font-semibold text-[#8E7952] dark:text-[#C5A059] hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Add New Card</span>
+                </button>
+              </div>
+              <select
+                value={editingCardId || ''}
+                onChange={(e) => {
+                  const targetId = e.target.value;
+                  if (targetId === 'new') {
+                    handleStartAddNewCard();
+                  } else {
+                    const found = vaultCards.find((c) => c.id === targetId);
+                    if (found) handleOpenEditCard(found);
+                  }
+                }}
+                className="w-full min-h-[42px] px-3.5 py-2 rounded-xl bg-white dark:bg-[#141412] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059] cursor-pointer"
+              >
+                {editingCardId === 'new' && <option value="new">★ [New Unsaved Card]</option>}
+                {vaultCards.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.network} · {c.cardType || getCardType(c)}) — •••• {c.last4}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {editCardError && (
-              <div className="mb-3 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
+              <div className="mb-3.5 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 font-medium">
                 {editCardError}
               </div>
             )}
 
             {editCardSuccess && (
-              <div className="mb-3 p-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#C5A059]/50 text-xs text-[#8E7952] dark:text-[#C5A059] flex items-center gap-1.5 font-medium">
+              <div className="mb-3.5 p-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#C5A059]/50 text-xs text-[#8E7952] dark:text-[#C5A059] flex items-center gap-1.5 font-medium">
                 <Check className="w-4 h-4" />
                 <span>{editCardSuccess}</span>
               </div>
             )}
 
-            <form onSubmit={handleSaveEditCard} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
-                  Card or Bank Name
-                </label>
-                <input
-                  type="text"
-                  value={editCardName}
-                  onChange={(e) => setEditCardName(e.target.value)}
-                  placeholder="e.g., HDFC Millennia, ICICI Sapphiro, SBI Cashback"
-                  className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
-                  required
-                />
+            <form onSubmit={handleSaveEditCard} className="space-y-4">
+              {/* 1. Card Name & Type */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                    Card / Bank Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editCardName}
+                    onChange={(e) => setEditCardName(e.target.value)}
+                    placeholder="e.g. HDFC Salary Debit, SBI Cashback"
+                    className="w-full min-h-[42px] px-3.5 py-2 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                    Card Type
+                  </label>
+                  <select
+                    value={editCardType}
+                    onChange={(e) => setEditCardType(e.target.value as CardType)}
+                    className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059] cursor-pointer"
+                  >
+                    <option value="Debit">Debit Card</option>
+                    <option value="Credit">Credit Card</option>
+                  </select>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 min-[360px]:grid-cols-3 gap-3">
+              {/* 2. 16-Digit Card Numbers */}
+              <div className="grid grid-cols-3 gap-2.5">
                 <div>
                   <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
                     First 4 Digits
@@ -1538,7 +1376,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                     value={editCardPrefix4}
                     onChange={(e) => setEditCardPrefix4(e.target.value.replace(/\D/g, ''))}
                     placeholder="4532"
-                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium tabular-nums text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                    className="w-full min-h-[42px] px-3 py-2 text-center rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-mono font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
                   />
                 </div>
                 <div>
@@ -1551,7 +1389,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                     value={editCardMiddleDigits}
                     onChange={(e) => setEditCardMiddleDigits(e.target.value)}
                     placeholder="8841 9200"
-                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium tabular-nums text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                    className="w-full min-h-[42px] px-3 py-2 text-center rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-mono font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
                   />
                 </div>
                 <div>
@@ -1564,12 +1402,13 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                     value={editCardLast4}
                     onChange={(e) => setEditCardLast4(e.target.value.replace(/\D/g, ''))}
                     placeholder="6789"
-                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium tabular-nums text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                    className="w-full min-h-[42px] px-3 py-2 text-center rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-mono font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 min-[360px]:grid-cols-3 gap-3">
+              {/* 3. Expiry, Network, Tier, CVV */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 <div>
                   <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
                     Expiry (MM/YY)
@@ -1580,17 +1419,17 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                     value={editCardExpiry}
                     onChange={(e) => setEditCardExpiry(e.target.value)}
                     placeholder="12/29"
-                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium tabular-nums text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                    className="w-full min-h-[42px] px-3 py-2 text-center rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-mono font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
-                    Card Network
+                    Network
                   </label>
                   <select
                     value={editCardNetwork}
                     onChange={(e) => setEditCardNetwork(e.target.value as CardNetwork)}
-                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059] cursor-pointer"
+                    className="w-full min-h-[42px] px-2.5 py-2 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059] cursor-pointer"
                   >
                     <option value="VISA">VISA</option>
                     <option value="Mastercard">Mastercard</option>
@@ -1606,12 +1445,26 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                     type="text"
                     value={editCardTier}
                     onChange={(e) => setEditCardTier(e.target.value)}
-                    placeholder="Signature / Platinum"
-                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                    placeholder="Signature"
+                    className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1">
+                    CVV
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={editCardCvv}
+                    onChange={(e) => setEditCardCvv(e.target.value.replace(/\D/g, ''))}
+                    placeholder="842"
+                    className="w-full min-h-[42px] px-3 py-2 text-center rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-mono font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
                   />
                 </div>
               </div>
 
+              {/* 4. Visual Card Theme Finish */}
               <div>
                 <label className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1.5">
                   Card Theme Finish
@@ -1630,7 +1483,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                         key={thm.id}
                         type="button"
                         onClick={() => setEditCardTheme(thm.id as CardThemeFinish)}
-                        className={`p-2.5 rounded-xl text-left border flex items-center justify-between transition-all cursor-pointer ${
+                        className={`p-2 rounded-xl text-left border flex items-center justify-between transition-all cursor-pointer ${
                           isSelected
                             ? 'border-[#C5A059] ring-2 ring-[#C5A059]/40 bg-[#F6F5F0] dark:bg-[#22211D]'
                             : 'border-[#E5E0D4] dark:border-[#282622] hover:border-[#C5A059]/40'
@@ -1639,33 +1492,164 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                         <span className="text-[11px] font-medium text-[#141412] dark:text-[#F6F5F0]">
                           {thm.label}
                         </span>
-                        <span
-                          className={`w-3.5 h-3.5 rounded-full ${thm.color} border border-white/20 shrink-0`}
-                        />
+                        <span className={`w-3.5 h-3.5 rounded-full ${thm.color} border border-white/20 shrink-0`} />
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              <div className="pt-2 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 border-t border-[#E5E0D4] dark:border-[#282622]">
+              {/* 5. UPI ID (Displayed on Back of Card) */}
+              <div className="pt-2 border-t border-[#E5E0D4] dark:border-[#282622]">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-[#141412] dark:text-[#F6F5F0]">
+                    UPI Payment ID (Back of Card)
+                  </label>
+                  <span className="text-[10px] text-[#8E7952] dark:text-[#C5A059] font-medium">
+                    Displayed on Card Back
+                  </span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={editCardUpi}
+                    onChange={(e) => setEditCardUpi(e.target.value)}
+                    placeholder="e.g. salary.hdfc@upi or name.vault@okaxis"
+                    className="w-full min-h-[42px] pl-3.5 pr-22 py-2 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-mono font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                  />
+                  {editCardUpi && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cleanUpi = editCardUpi.trim();
+                        const cleanName = editCardName.trim() || 'Vault User';
+                        setEditCardQrCodeData(`upi://pay?pa=${cleanUpi}&pn=${encodeURIComponent(cleanName)}&cu=INR`);
+                      }}
+                      className="absolute right-2 top-2 px-2 py-1 rounded-md bg-[#E5E0D4] dark:bg-[#2C2A25] text-[10px] font-semibold text-[#8E7952] dark:text-[#C5A059] hover:bg-[#D5D0C5] transition-colors cursor-pointer"
+                      title="Auto-format UPI QR payload link"
+                    >
+                      Auto QR
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-[#78746B] dark:text-[#9E9B92] mt-1">
+                  Shown when flipped in the 3D showcase. Tapping "Auto QR" generates the NPCI payment link.
+                </p>
+              </div>
+
+              {/* 6. UPI QR Code Configuration & Live Visual Preview */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-[#141412] dark:text-[#F6F5F0]">
+                    QR Code Payload &amp; Preview
+                  </label>
+                  <span className="text-[10px] text-[#8E7952] dark:text-[#C5A059] font-medium">
+                    Live SVG Generator
+                  </span>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      value={editCardQrCodeData}
+                      onChange={(e) => setEditCardQrCodeData(e.target.value)}
+                      placeholder="upi://pay?pa=name@upi&pn=Vault&cu=INR"
+                      className="w-full min-h-[42px] px-3.5 py-2 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-mono font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                    />
+                    <p className="text-[10px] text-[#78746B] dark:text-[#9E9B92] mt-1">
+                      Rendered on the back of the card. Scan with GPay, PhonePe, or Paytm.
+                    </p>
+                  </div>
+                  {/* Live QR Code Box */}
+                  <div className="w-16 h-16 p-1 bg-white rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] shadow-xs shrink-0 flex items-center justify-center">
+                    <UpiQrCodeSvg
+                      upiId={editCardQrCodeData || editCardUpi || 'inflotrack.vault@okaxis'}
+                      name={editCardName || 'Vault User'}
+                      className="w-full h-full"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 7. Delete Card Action (Protected by Authentication & Double Confirmation) */}
+              {editingCardId !== 'new' && (
+                <div className="pt-2 border-t border-[#E5E0D4] dark:border-[#282622]">
+                  {!isDeleteCardConfirmOpen ? (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] block">
+                          Delete Card
+                        </span>
+                        <span className="text-[10px] text-[#78746B] dark:text-[#9E9B92]">
+                          Permanently remove this card and its linked UPI/QR code
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsDeleteCardConfirmOpen(true)}
+                        disabled={vaultCards.length <= 1}
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        title={vaultCards.length <= 1 ? 'At least one card must remain in vault' : 'Delete this card'}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Delete Card</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 space-y-2">
+                      <div className="flex items-center gap-2 text-rose-700 dark:text-rose-300 text-xs font-semibold">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>Permanently delete "{editCardName}"?</span>
+                      </div>
+                      <p className="text-[11px] text-rose-600 dark:text-rose-400">
+                        This card, its numbers, UPI ID, and QR code will be permanently removed from your database and Google Sheets.
+                      </p>
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setIsDeleteCardConfirmOpen(false)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-[#78746B] dark:text-[#9E9B92] hover:bg-white dark:hover:bg-[#22211D] transition-colors cursor-pointer"
+                        >
+                          Keep Card
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDeleteCard}
+                          disabled={isSavingCard}
+                          className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          {isSavingCard ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                          <span>Confirm Deletion</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Bottom Action Buttons */}
+              <div className="pt-3 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 border-t border-[#E5E0D4] dark:border-[#282622]">
                 <span className="text-[11px] text-[#78746B] dark:text-[#9E9B92]">
-                  Unlocked with PIN · No password required
+                  Changes are persisted to database &amp; synced to Google Sheets
                 </span>
                 <div className="flex items-center gap-2 justify-end">
                   <button
                     type="button"
-                    onClick={() => setIsEditCardOpen(false)}
+                    onClick={() => {
+                      setIsEditCardOpen(false);
+                      setIsDeleteCardConfirmOpen(false);
+                    }}
                     className="min-h-[42px] px-3.5 py-2 rounded-xl text-xs font-medium text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-white transition-colors cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="min-h-[42px] px-4 py-2 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                    disabled={isSavingCard}
+                    className="min-h-[42px] px-4 py-2 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
                   >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Save Card Details</span>
+                    {isSavingCard ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    <span>{editingCardId === 'new' ? 'Save New Card' : 'Save Card Details'}</span>
                   </button>
                 </div>
               </div>
