@@ -894,11 +894,9 @@ const MONTHLY_SHEET_HEADERS = [
   'is_deleted',
 ];
 
-/**
- * Returns canonical month sheet name in 'mmm-yyyy' format.
- * Requirement: For September, uses 'sept-YYYY' (e.g. 'sept-2026'); for October 'oct-YYYY', etc.
- */
-function getCanonicalMonthSheetName(rawDate?: string): string {
+const SHORT_MONTH_NAMES_TITLE = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function parseDateYearAndMonth(rawDate?: string): { year: number; monthIndex: number } {
   let year = new Date().getFullYear();
   let monthIndex = new Date().getMonth();
 
@@ -908,6 +906,29 @@ function getCanonicalMonthSheetName(rawDate?: string): string {
       const parts = norm.split('-');
       year = parseInt(parts[0], 10);
       monthIndex = parseInt(parts[1], 10) - 1;
+    } else if (/^\d{4}-\d{2}$/.test(norm)) {
+      const parts = norm.split('-');
+      year = parseInt(parts[0], 10);
+      monthIndex = parseInt(parts[1], 10) - 1;
+    } else {
+      const clean = String(rawDate).trim().toLowerCase();
+      const match = clean.match(/^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[\-_ \t]+(\d{4})$/i);
+      if (match) {
+        year = parseInt(match[2], 10);
+        const m = match[1].toLowerCase();
+        if (m.startsWith('sep')) monthIndex = 8;
+        else if (m.startsWith('jan')) monthIndex = 0;
+        else if (m.startsWith('feb')) monthIndex = 1;
+        else if (m.startsWith('mar')) monthIndex = 2;
+        else if (m.startsWith('apr')) monthIndex = 3;
+        else if (m.startsWith('may')) monthIndex = 4;
+        else if (m.startsWith('jun')) monthIndex = 5;
+        else if (m.startsWith('jul')) monthIndex = 6;
+        else if (m.startsWith('aug')) monthIndex = 7;
+        else if (m.startsWith('oct')) monthIndex = 9;
+        else if (m.startsWith('nov')) monthIndex = 10;
+        else if (m.startsWith('dec')) monthIndex = 11;
+      }
     }
   }
 
@@ -917,7 +938,15 @@ function getCanonicalMonthSheetName(rawDate?: string): string {
     monthIndex = now.getMonth();
   }
 
-  const monthAbbr = monthIndex === 8 ? 'sept' : SHORT_MONTH_NAMES[monthIndex];
+  return { year, monthIndex };
+}
+
+/**
+ * Returns canonical month sheet name in 'Mmm-YYYY' format (e.g. 'Sep-2026', 'Oct-2026', 'Nov-2026').
+ */
+function getCanonicalMonthSheetName(rawDate?: string): string {
+  const { year, monthIndex } = parseDateYearAndMonth(rawDate);
+  const monthAbbr = SHORT_MONTH_NAMES_TITLE[monthIndex];
   return `${monthAbbr}-${year}`;
 }
 
@@ -927,36 +956,141 @@ function getMonthSheetName(rawDate?: string): string {
 
 function isMonthlySheetTab(title: string): boolean {
   const clean = title.trim().toLowerCase();
-  return /^(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[\-_]\d{4}$/.test(clean);
+  return /^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[-_ \t]*\d{4}$/i.test(clean);
 }
 
 function resolveMatchingMonthSheetTitle(existingSheetTitles: string[], rawDate?: string): string {
-  let year = new Date().getFullYear();
-  let monthIndex = new Date().getMonth();
+  const { year, monthIndex } = parseDateYearAndMonth(rawDate);
+  const mTitle = SHORT_MONTH_NAMES_TITLE[monthIndex];
+  const mLower = mTitle.toLowerCase();
 
-  if (rawDate) {
-    const norm = normalizeSheetDate(rawDate);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(norm)) {
-      const parts = norm.split('-');
-      year = parseInt(parts[0], 10);
-      monthIndex = parseInt(parts[1], 10) - 1;
-    }
-  }
+  const candidateAliases = [
+    `${mTitle}-${year}`,
+    `${mLower}-${year}`,
+    `${mTitle}_${year}`,
+    `${mLower}_${year}`,
+    `${mTitle} ${year}`,
+    `${mLower} ${year}`,
+  ];
 
-  const aliases: string[] = [];
   if (monthIndex === 8) {
-    aliases.push(`sept-${year}`, `sep-${year}`, `sept_${year}`, `sep_${year}`);
-  } else if (monthIndex >= 0 && monthIndex <= 11) {
-    const m = SHORT_MONTH_NAMES[monthIndex];
-    aliases.push(`${m}-${year}`, `${m}_${year}`);
+    candidateAliases.push(
+      `Sept-${year}`,
+      `sept-${year}`,
+      `Sept_${year}`,
+      `sept_${year}`,
+      `Sept ${year}`,
+      `sept ${year}`,
+      `SEPT-${year}`,
+      `SEPT_${year}`
+    );
   }
 
-  for (const alias of aliases) {
+  // Check exact alias matches
+  for (const alias of candidateAliases) {
     const match = existingSheetTitles.find((title) => title.trim().toLowerCase() === alias.toLowerCase());
-    if (match) return match;
+    if (match) return match.trim();
   }
 
-  return getCanonicalMonthSheetName(rawDate);
+  // Check regex pattern match
+  const mRegex = new RegExp(`^(?:${mLower}|${monthIndex === 8 ? 'sept|sep' : mLower})[-_ \t]*${year}$`, 'i');
+  const regexMatch = existingSheetTitles.find((title) => mRegex.test(title.trim()));
+  if (regexMatch) return regexMatch.trim();
+
+  return `${mTitle}-${year}`;
+}
+
+/**
+ * Checks whether a tab for that month already exists in Google Sheets.
+ * If the tab exists, returns its title; if not, automatically creates a new tab
+ * using the month format (e.g. "Sep-2026", "Oct-2026") with frozen row 1 and headers.
+ */
+async function ensureMonthlySheetTabExists(
+  accessToken: string,
+  spreadsheetId: string,
+  rawDateOrTitle: string
+): Promise<string> {
+  try {
+    const metaRes = await fetch(
+      `${SHEETS_BASE_URL}/${spreadsheetId}?fields=sheets(properties(sheetId,title))`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!metaRes.ok) return getCanonicalMonthSheetName(rawDateOrTitle);
+
+    const metaData = await metaRes.json();
+    const existingTitles: string[] = (metaData.sheets || []).map((s: any) => String(s.properties?.title || '').trim());
+
+    // 1. Check if matching tab already exists (case-insensitive / alias-aware)
+    const matchingTitle = resolveMatchingMonthSheetTitle(existingTitles, rawDateOrTitle);
+    const alreadyExists = existingTitles.some(
+      (t) => t.toLowerCase() === matchingTitle.toLowerCase()
+    );
+
+    if (alreadyExists) {
+      return matchingTitle;
+    }
+
+    // 2. Tab does not exist -> Automatically create new tab using format e.g. "Sep-2026", "Oct-2026"
+    const newTabTitle = getCanonicalMonthSheetName(rawDateOrTitle);
+    const addRes = await fetch(`${SHEETS_BASE_URL}/${spreadsheetId}:batchUpdate`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        requests: [
+          {
+            addSheet: {
+              properties: {
+                title: newTabTitle,
+                gridProperties: { frozenRowCount: 1 },
+              },
+            },
+          },
+        ],
+      }),
+    });
+
+    if (addRes.ok) {
+      // Add standardized 13-column header row
+      await fetch(
+        `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(
+          newTabTitle
+        )}!A1:M1?valueInputOption=USER_ENTERED`,
+        {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            values: [
+              [
+                'Date',
+                'Type',
+                'Category',
+                'Amount',
+                'Payment Mode',
+                'Description',
+                'User UID',
+                'Transaction ID',
+                'Subcategory',
+                'Account / Wallet',
+                'Time',
+                'Created At',
+                'Updated At',
+              ],
+            ],
+          }),
+        }
+      ).catch(() => {});
+    }
+
+    return newTabTitle;
+  } catch {
+    return getCanonicalMonthSheetName(rawDateOrTitle);
+  }
 }
 
 function getColumnIndexMap(headerRow: string[]): Record<string, number> {
@@ -1707,40 +1841,53 @@ async function syncFromLiveGoogleSheetsIfConfigured(
       sheetId: s.properties?.sheetId ?? 0,
     }));
 
-    const monthPattern = /^[A-Z]{3}_\d{4}$/i;
     const txSheetTitles = allSheets
       .map((s) => s.title)
-      .filter((title) => monthPattern.test(title) || title === 'Transactions' || title === GOOGLE_SPREADSHEET_NAME);
+      .filter((title) => isMonthlySheetTab(title) || title === 'Transactions' || title === GOOGLE_SPREADSHEET_NAME);
 
     const fetchedForUser: StoredTransactionRow[] = [];
 
     for (const sheetTitle of txSheetTitles) {
       const url = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(
         sheetTitle
-      )}!A2:M?valueRenderOption=FORMATTED_VALUE`;
+      )}!A1:M?valueRenderOption=FORMATTED_VALUE`;
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (!res.ok) continue;
       const data = await res.json();
-      const rows: string[][] = data.values || [];
+      const rawRows: string[][] = data.values || [];
+      if (rawRows.length <= 1) continue;
 
-      rows.forEach((row: any[], index: number) => {
+      const headerRow = rawRows[0] || [];
+      const colMap = getColumnIndexMap(headerRow);
+      const getVal = (r: any[], colKey: string, fallbackIdx: number): string => {
+        if (colMap[colKey] !== undefined && r[colMap[colKey]] !== undefined) {
+          return String(r[colMap[colKey]] || '').trim();
+        }
+        return String(r[fallbackIdx] || '').trim();
+      };
+
+      rawRows.slice(1).forEach((row: any[], index: number) => {
         const rowIndex = index + 2;
-        const date = normalizeSheetDate(row[0] || '');
-        const type = String(row[1] || 'Expense').trim();
-        const category = String(row[2] || 'Uncategorized').trim();
-        const rawAmount = String(row[3] || '0').replace(/[₹$,\s]/g, '');
+        const date = normalizeSheetDate(getVal(row, 'date', 0));
+        const type = getVal(row, 'type', 1) || 'Expense';
+        const category = getVal(row, 'category', 2) || 'Uncategorized';
+        const rawAmount = getVal(row, 'amount', 3).replace(/[₹$,\s]/g, '');
         const amount = parseFloat(rawAmount);
-        const paymentMode = String(row[4] || 'HDFC Bank').trim();
-        const description = String(row[5] || '').trim();
-        const rowUid = String(row[6] || '').trim();
-        const transactionId = String(row[7] || `tx-${sheetTitle}-${rowIndex}-${date}`).trim();
-        const subcategory = String(row[8] || '').trim();
-        const account = String(row[9] || 'Primary Bank Account').trim();
-        const time = String(row[10] || '09:00').trim();
-        const createdAt = String(row[11] || new Date().toISOString()).trim();
-        const updatedAt = String(row[12] || createdAt).trim();
+        const paymentMode = getVal(row, 'paymentmode', 4) || 'HDFC Bank';
+        const description = getVal(row, 'description', 5);
+        const rowUid = getVal(row, 'useruid', 6) || getVal(row, 'userid', 6);
+        const rawTxId = getVal(row, 'transactionid', 7) || getVal(row, 'recordid', 7);
+        const transactionId = rawTxId || `tx_${sheetTitle.replace(/[^a-zA-Z0-9]/g, '')}_r${rowIndex}_${date}`;
+        const subcategory = getVal(row, 'subcategory', 8);
+        const account = getVal(row, 'account', 9) || getVal(row, 'accountwallet', 9) || 'Primary Bank Account';
+        const time = getVal(row, 'time', 10) || '09:00';
+        const createdAt = getVal(row, 'createdat', 11) || new Date().toISOString();
+        const updatedAt = getVal(row, 'updatedat', 12) || createdAt;
+        const isDeleted = getVal(row, 'isdeleted', 14) === 'true';
+
+        if (isDeleted) return;
 
         // Enforce UID ownership or accept unassigned rows created directly in Google Sheet
         const isOwned = !rowUid || rowUid === uid || (wb.primaryOwnerUid === uid);
@@ -1767,14 +1914,61 @@ async function syncFromLiveGoogleSheetsIfConfigured(
     }
 
     if (fetchedForUser.length > 0) {
-      const scannedSheets = new Set(txSheetTitles);
-      const untouchedTxs = wb.transactions.filter(
-        (t) => t.uid === uid && !scannedSheets.has(t.sheetName)
-      );
+      const scannedSheets = new Set(txSheetTitles.map((s) => s.toLowerCase()));
+      const existingUserTxs = wb.transactions.filter((t) => t.uid === uid);
+      const otherUserTxs = wb.transactions.filter((t) => t.uid !== uid);
+
+      const matchedTxIds = new Set<string>();
+      const updatedUserTxs: StoredTransactionRow[] = [];
+
+      // Two-Way Sync Reconciliation: Update existing or append newly found remote records
+      for (const remote of fetchedForUser) {
+        let match = existingUserTxs.find((t) => t.transactionId === remote.transactionId);
+        if (!match) {
+          match = existingUserTxs.find(
+            (t) =>
+              t.sheetName.toLowerCase() === remote.sheetName.toLowerCase() &&
+              t.date === remote.date &&
+              t.type.toLowerCase() === remote.type.toLowerCase() &&
+              t.category.toLowerCase() === remote.category.toLowerCase() &&
+              Math.abs(t.amount - remote.amount) < 0.01 &&
+              !matchedTxIds.has(t.transactionId)
+          );
+        }
+
+        if (match) {
+          matchedTxIds.add(match.transactionId);
+          updatedUserTxs.push({
+            ...match,
+            ...remote,
+            rowIndex: remote.rowIndex || match.rowIndex,
+            transactionId: match.transactionId || remote.transactionId,
+            updatedAt: remote.updatedAt || new Date().toISOString(),
+          });
+        } else {
+          matchedTxIds.add(remote.transactionId);
+          updatedUserTxs.push(remote);
+        }
+      }
+
+      // Preserve local transactions from sheets not scanned in Google Sheets
+      const unscannedTxs = existingUserTxs.filter((t) => !scannedSheets.has(t.sheetName.toLowerCase()));
+
+      // Protect very newly created local transactions (< 20 seconds old) from race condition
+      const nowMs = Date.now();
+      const recentLocalTxs = existingUserTxs.filter((t) => {
+        if (scannedSheets.has(t.sheetName.toLowerCase()) && !matchedTxIds.has(t.transactionId)) {
+          const cTime = new Date(t.createdAt).getTime();
+          return !isNaN(cTime) && nowMs - cTime < 20000;
+        }
+        return false;
+      });
+
       wb.transactions = [
-        ...wb.transactions.filter((t) => t.uid !== uid),
-        ...untouchedTxs,
-        ...fetchedForUser,
+        ...otherUserTxs,
+        ...unscannedTxs,
+        ...recentLocalTxs,
+        ...updatedUserTxs,
       ];
       saveWorkbook(wb);
     } else if (wb.transactions.some((t) => t.uid === uid)) {
@@ -1840,28 +2034,39 @@ async function findRowInLiveGoogleSheet(
   tx: StoredTransactionRow
 ): Promise<number | null> {
   try {
-    const url = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(sheetTitle)}!A2:H?valueRenderOption=FORMATTED_VALUE`;
+    const url = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(sheetTitle)}!A1:M?valueRenderOption=FORMATTED_VALUE`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!res.ok) return null;
     const data = await res.json();
     const rows: string[][] = data.values || [];
+    if (rows.length <= 1) return null;
 
+    const headerRow = rows[0] || [];
+    const colMap = getColumnIndexMap(headerRow);
+    const txIdCol = colMap['transactionid'] ?? colMap['recordid'] ?? 7;
+    const dateCol = colMap['date'] ?? 0;
+    const typeCol = colMap['type'] ?? 1;
+    const catCol = colMap['category'] ?? 2;
+    const amtCol = colMap['amount'] ?? 3;
+
+    // 1. Primary matching: match exact immutable transactionId
     if (tx.transactionId) {
-      for (let i = 0; i < rows.length; i++) {
-        if (String(rows[i][7] || '').trim() === tx.transactionId) {
-          return i + 2;
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][txIdCol] || '').trim() === tx.transactionId) {
+          return i + 1; // 1-based row index in Google Sheet
         }
       }
     }
 
+    // 2. Secondary matching: match by date, type, category, and amount
     const formattedDate = formatDateToDDMMYYYY(tx.date);
-    for (let i = 0; i < rows.length; i++) {
-      const rDate = String(rows[i][0] || '').trim();
-      const rType = String(rows[i][1] || '').trim();
-      const rCat = String(rows[i][2] || '').trim();
-      const rawAmt = String(rows[i][3] || '0').replace(/[₹$,\s]/g, '');
+    for (let i = 1; i < rows.length; i++) {
+      const rDate = normalizeSheetDate(String(rows[i][dateCol] || '').trim());
+      const rType = String(rows[i][typeCol] || '').trim();
+      const rCat = String(rows[i][catCol] || '').trim();
+      const rawAmt = String(rows[i][amtCol] || '0').replace(/[₹$,\s]/g, '');
       const rAmt = parseFloat(rawAmt);
       if (
         (rDate === tx.date || rDate === formattedDate) &&
@@ -1869,7 +2074,7 @@ async function findRowInLiveGoogleSheet(
         rCat.toLowerCase() === tx.category.toLowerCase() &&
         Math.abs(rAmt - tx.amount) < 0.01
       ) {
-        return i + 2;
+        return i + 1; // 1-based row index in Google Sheet
       }
     }
     return null;
@@ -1914,62 +2119,9 @@ async function appendToLiveGoogleSheetIfConfigured(
   });
   if (!spreadsheetId) return;
 
-  const sheetTitle = tx.sheetName;
-
-  // Ensure monthly sheet exists with 13-column header (A:M)
-  const metaRes = await fetch(
-    `${SHEETS_BASE_URL}/${spreadsheetId}?fields=sheets(properties(sheetId,title))`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  if (metaRes.ok) {
-    const metaData = await metaRes.json();
-    const exists = (metaData.sheets || []).some(
-      (s: any) => s.properties?.title?.toUpperCase() === sheetTitle.toUpperCase()
-    );
-    if (!exists) {
-      await fetch(`${SHEETS_BASE_URL}/${spreadsheetId}:batchUpdate`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          requests: [{ addSheet: { properties: { title: sheetTitle, gridProperties: { frozenRowCount: 1 } } } }],
-        }),
-      });
-      await fetch(
-        `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(
-          sheetTitle
-        )}!A1:M1?valueInputOption=USER_ENTERED`,
-        {
-          method: 'PUT',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            values: [
-              [
-                'Date',
-                'Type',
-                'Category',
-                'Amount',
-                'Payment Mode',
-                'Description',
-                'User UID',
-                'Transaction ID',
-                'Subcategory',
-                'Account / Wallet',
-                'Time',
-                'Created At',
-                'Updated At',
-              ],
-            ],
-          }),
-        }
-      );
-    }
-  }
+  // 1. Determine transaction month from date and check/create monthly tab ("Sep-2026", "Oct-2026")
+  const resolvedTabName = await ensureMonthlySheetTabExists(accessToken, spreadsheetId, tx.date);
+  tx.sheetName = resolvedTabName;
 
   const rowValues = [
     formatDateToDDMMYYYY(tx.date),
@@ -1987,9 +2139,29 @@ async function appendToLiveGoogleSheetIfConfigured(
     tx.updatedAt,
   ];
 
+  // 2. Prevent duplicate expense records during synchronization
+  const existingRow = await findRowInLiveGoogleSheet(accessToken, spreadsheetId, resolvedTabName, tx);
+  if (existingRow) {
+    await fetch(
+      `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(
+        resolvedTabName
+      )}!A${existingRow}:M${existingRow}?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ values: [rowValues] }),
+      }
+    );
+    return;
+  }
+
+  // 3. Append to corresponding monthly tab
   const appendRes = await fetch(
     `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(
-      sheetTitle
+      resolvedTabName
     )}!A:M:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     {
       method: 'POST',
@@ -2043,7 +2215,28 @@ async function updateInLiveGoogleSheetIfConfigured(
     });
     if (!spreadsheetId) return;
 
-    const targetRow = await findRowInLiveGoogleSheet(accessToken, spreadsheetId, tx.sheetName, tx);
+    // Check if the transaction's month matches its sheetName tab
+    const targetMonthTab = await ensureMonthlySheetTabExists(accessToken, spreadsheetId, tx.date);
+
+    // If month changed, clear from old tab and append to new tab
+    if (tx.sheetName && tx.sheetName.toLowerCase() !== targetMonthTab.toLowerCase()) {
+      const oldRow = await findRowInLiveGoogleSheet(accessToken, spreadsheetId, tx.sheetName, tx);
+      if (oldRow) {
+        await fetch(
+          `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(tx.sheetName)}!A${oldRow}:M${oldRow}:clear`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${accessToken}` },
+          }
+        ).catch(() => {});
+      }
+      tx.sheetName = targetMonthTab;
+      await appendToLiveGoogleSheetIfConfigured(tx, userGoogleToken, driveCfg);
+      return;
+    }
+
+    tx.sheetName = targetMonthTab;
+    const targetRow = await findRowInLiveGoogleSheet(accessToken, spreadsheetId, targetMonthTab, tx);
     const rowNumber = targetRow || tx.rowIndex;
 
     const rowValues = [
@@ -2063,7 +2256,7 @@ async function updateInLiveGoogleSheetIfConfigured(
     ];
 
     await fetch(
-      `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(tx.sheetName)}!A${rowNumber}:M${rowNumber}?valueInputOption=USER_ENTERED`,
+      `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(targetMonthTab)}!A${rowNumber}:M${rowNumber}?valueInputOption=USER_ENTERED`,
       {
         method: 'PUT',
         headers: {
@@ -3591,21 +3784,30 @@ async function startServer() {
       }
 
       const rowIndicesToDelete = new Set<number>();
+      const txIdsToDelete = new Set<string>();
       for (const item of targets) {
         if (typeof item === 'number') {
           rowIndicesToDelete.add(item);
-        } else if (item && typeof item.rowIndex === 'number') {
-          rowIndicesToDelete.add(item.rowIndex);
+        } else if (typeof item === 'string') {
+          txIdsToDelete.add(item);
+        } else if (item && typeof item === 'object') {
+          if (typeof item.rowIndex === 'number') rowIndicesToDelete.add(item.rowIndex);
+          if (typeof item.transactionId === 'string' && item.transactionId) txIdsToDelete.add(item.transactionId);
+          if (typeof item.id === 'string' && item.id) txIdsToDelete.add(item.id);
         }
       }
 
       const wb = loadWorkbook();
       ensureUserRecords(wb, uid);
 
+      const isTargetMatch = (t: StoredTransactionRow) =>
+        (t.rowIndex !== undefined && rowIndicesToDelete.has(t.rowIndex)) ||
+        (t.transactionId ? txIdsToDelete.has(t.transactionId) : false);
+
       // CRITICAL AUTHORIZATION CHECK: Verify every targeted row belongs to req.user.uid
-      for (const targetRowIdx of rowIndicesToDelete) {
-        const match = wb.transactions.find((t) => t.rowIndex === targetRowIdx);
-        if (match && match.uid !== uid) {
+      const targetedRecords = wb.transactions.filter((t) => isTargetMatch(t));
+      for (const rec of targetedRecords) {
+        if (rec.uid !== uid) {
           res.status(403).json({
             error: 'Unauthorized access: You cannot delete another user\'s financial records.',
             code: 'FORBIDDEN_NOT_OWNER',
@@ -3614,17 +3816,13 @@ async function startServer() {
         }
       }
 
-      const deletedRows = wb.transactions.filter(
-        (t) => t.uid === uid && rowIndicesToDelete.has(t.rowIndex)
-      );
-      wb.transactions = wb.transactions.filter(
-        (t) => !(t.uid === uid && rowIndicesToDelete.has(t.rowIndex))
-      );
+      const deletedRows = wb.transactions.filter((t) => t.uid === uid && isTargetMatch(t));
+      wb.transactions = wb.transactions.filter((t) => !(t.uid === uid && isTargetMatch(t)));
       saveWorkbook(wb);
       await deleteFromLiveGoogleSheetIfConfigured(deletedRows, uid, req.googleAccessToken, wb.userDriveConfigs[uid]);
       await syncStateToDriveFolderIfConfigured(wb, uid, req.googleAccessToken);
 
-      res.json({ success: true, deletedCount: rowIndicesToDelete.size });
+      res.json({ success: true, deletedCount: deletedRows.length });
     } catch {
       res.status(500).json({ error: 'Failed to delete transactions from Google Sheets.' });
     }

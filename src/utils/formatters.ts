@@ -252,3 +252,21 @@ export function getNextMonthKey(monthKey: string): string {
   return `${year}-${String(month).padStart(2, '0')}`;
 }
 
+/**
+ * Returns canonical Google Sheets monthly expense tab name in "Mmm-YYYY" format (e.g. "Sep-2026", "Oct-2026")
+ */
+export function getMonthTabName(rawDate?: string): string {
+  const normalized = rawDate ? normalizeDateString(rawDate) : getTodayDateString();
+  const parts = normalized.split('-');
+  const SHORT_MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  if (parts.length === 3) {
+    const year = parts[0];
+    const monthIndex = parseInt(parts[1], 10) - 1;
+    if (monthIndex >= 0 && monthIndex < 12) {
+      return `${SHORT_MONTH_NAMES[monthIndex]}-${year}`;
+    }
+  }
+  const now = new Date();
+  return `${SHORT_MONTH_NAMES[now.getMonth()]}-${now.getFullYear()}`;
+}
+

@@ -42,7 +42,7 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
   const [rangeMonths, setRangeMonths] = useState<number>(6);
   const [activeView, setActiveView] = useState<AnalyticsTab>('overview');
 
-  const data = calculateMonthlyComparison(transactions, rangeMonths);
+  const data = calculateMonthlyComparison(transactions, rangeMonths, selectedMonth);
 
   const currentMonthItem =
     data.find((d) => d.monthKey === selectedMonth) || data[data.length - 1];
@@ -66,6 +66,9 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
 
   const totalRangeIncome = data.reduce((acc, curr) => acc + curr.income, 0);
   const totalRangeExpenses = data.reduce((acc, curr) => acc + curr.expenses, 0);
+  const hasTransactionsInRange = data.some(
+    (d) => d.hasTransactions || d.income > 0 || d.expenses > 0
+  );
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -194,9 +197,9 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
 
       {/* Bar Chart Container */}
       <div className="h-56 w-full">
-        {data.length === 0 || (totalRangeIncome === 0 && totalRangeExpenses === 0) ? (
+        {data.length === 0 || (!hasTransactionsInRange && totalRangeIncome === 0 && totalRangeExpenses === 0) ? (
           <div className="h-full flex items-center justify-center text-xs text-[#78746B] dark:text-[#9E9B92] bg-[#F6F5F0]/60 dark:bg-[#121210] rounded-xl">
-            No transaction records found for this period.
+            No transaction records found for this {rangeMonths}M period.
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -217,7 +220,7 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
                 strokeDasharray="3 3"
                 vertical={false}
                 stroke="#DCD9D0"
-                strokeOpacity={0.5}
+                strokeOpacity={0.4}
               />
               <XAxis
                 dataKey="label"
@@ -228,21 +231,23 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
               <YAxis
                 tickLine={false}
                 axisLine={false}
+                domain={[0, 'auto']}
+                allowDecimals={false}
                 tickFormatter={(val) => formatCompactINR(val)}
                 tick={{ fontSize: 10, fill: '#8A8880' }}
               />
               <Tooltip
                 content={<CustomTooltip />}
-                cursor={false}
+                cursor={{ fill: 'rgba(197, 160, 89, 0.08)' }}
               />
               {(activeView === 'overview' || activeView === 'income') && (
                 <Bar
                   dataKey="income"
                   name="Income"
-                  fill="#1E293B"
-                  radius={[8, 8, 4, 4]}
-                  maxBarSize={26}
-                  background={{ fill: '#F6F5F0', radius: 8 }}
+                  fill="#3B82F6"
+                  radius={[6, 6, 2, 2]}
+                  maxBarSize={28}
+                  minPointSize={6}
                 />
               )}
               {(activeView === 'overview' || activeView === 'expenses') && (
@@ -250,9 +255,9 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
                   dataKey="expenses"
                   name="Expenses"
                   fill="#C5A059"
-                  radius={[8, 8, 4, 4]}
-                  maxBarSize={26}
-                  background={{ fill: '#F6F5F0', radius: 8 }}
+                  radius={[6, 6, 2, 2]}
+                  maxBarSize={28}
+                  minPointSize={6}
                 />
               )}
             </BarChart>
@@ -264,7 +269,7 @@ export const MonthlyComparisonChart: React.FC<MonthlyComparisonChartProps> = ({
       <div className="mt-3 pt-3 border-t border-[#EFECE4] dark:border-[#24231F] flex items-center justify-between text-xs text-[#78746B] dark:text-[#9E9B92]">
         <div className="flex items-center gap-4">
           <span className="inline-flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-xs bg-[#1E293B]" />
+            <span className="w-2.5 h-2.5 rounded-xs bg-[#3B82F6]" />
             <span>Income</span>
           </span>
           <span className="inline-flex items-center gap-1.5">

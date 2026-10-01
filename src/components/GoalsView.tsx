@@ -410,7 +410,6 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
   const [vaultCards, setVaultCards] = useState<VaultCardItem[]>(() => getAllVaultCards());
   const [activeCardIndex, setActiveCardIndex] = useState<number>(0);
   const [swipeDirection, setSwipeDirection] = useState<number>(1);
-  const [isCardFlipped, setIsCardFlipped] = useState<boolean>(false);
   const [copiedUpi, setCopiedUpi] = useState<boolean>(false);
   const [cardFilterType, setCardFilterType] = useState<'ALL' | 'Debit' | 'Credit'>('ALL');
 
@@ -893,7 +892,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
         id="cards-section-showcase"
         className="grid grid-cols-1 lg:grid-cols-12 gap-5"
       >
-        {/* Left: Interactive Swipeable & Flippable 3-Card Deck */}
+        {/* Left: Interactive Swipeable 3-Card Deck */}
         <div className="lg:col-span-5 bg-white dark:bg-[#161614] rounded-2xl p-4 sm:p-6 border border-[#E5E0D4] dark:border-[#282622] flex flex-col items-center justify-between transition-colors shadow-2xs min-w-0 overflow-hidden">
           {/* Card Deck Top Header Bar */}
           <div className="w-full flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -909,14 +908,13 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
-                id="btn-flip-card"
-                onClick={() => setIsCardFlipped((prev) => !prev)}
-                title={isCardFlipped ? 'Flip to card front' : 'Flip to display UPI QR code and payment details'}
-                className="min-h-[42px] px-3 py-2 rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] bg-[#F6F5F0] hover:bg-[#EFECE4] dark:bg-[#22211D] dark:hover:bg-[#2C2A25] text-[#141412] dark:text-[#F6F5F0] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs"
+                id="btn-show-card-qr"
+                onClick={() => setIsQrEnlargedModalOpen(true)}
+                title="Display UPI QR code and payment details for this card"
+                className="min-h-[42px] px-3.5 py-2 rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] bg-[#F6F5F0] hover:bg-[#EFECE4] dark:bg-[#22211D] dark:hover:bg-[#2C2A25] text-[#141412] dark:text-[#F6F5F0] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs"
               >
-                <RotateCw className="w-3.5 h-3.5 text-[#C5A059] shrink-0" />
-                <span className="hidden sm:inline">{isCardFlipped ? 'Card Front' : 'Flip to QR'}</span>
-                <span className="sm:hidden">{isCardFlipped ? 'Front' : 'QR'}</span>
+                <QrCode className="w-3.5 h-3.5 text-[#C5A059] shrink-0" />
+                <span>QR Code</span>
               </button>
 
               <button
@@ -992,15 +990,14 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
               </div>
             )}
 
-            {/* Center Active Card with 3D Flip capability */}
+            {/* Center Active Card with Direct QR Option */}
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
                 key={activeCard.id}
-                drag={!isCardFlipped ? 'x' : undefined}
+                drag="x"
                 dragConstraints={{ left: 0, right: 0 }}
                 dragElastic={0.45}
                 onDragEnd={(_, info) => {
-                  if (isCardFlipped) return;
                   if (info.offset.x < -40 || info.velocity.x < -280) {
                     handleNextCard();
                   } else if (info.offset.x > 40 || info.velocity.x > 280) {
@@ -1011,245 +1008,77 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                 animate={{ opacity: 1, x: 0, scale: 1 }}
                 exit={{ opacity: 0, x: swipeDirection * -42, scale: 0.96 }}
                 transition={{ duration: 0.22, ease: 'easeOut' }}
-                style={{ perspective: 1000 }}
                 className="relative z-10 w-[min(90%,306px)] h-[184px] sm:h-[192px]"
               >
-                <motion.div
-                  animate={{ rotateY: isCardFlipped ? 180 : 0 }}
-                  transition={{ duration: 0.5, ease: [0.23, 1, 0.32, 1] }}
-                  style={{ transformStyle: 'preserve-3d' }}
-                  className="relative w-full h-full"
+                <div
+                  className={`relative w-full h-full rounded-2xl ${activeTheme.bg} ${activeTheme.text} p-4 sm:p-5 flex flex-col justify-between shadow-xl border ${activeTheme.border} overflow-hidden cursor-grab active:cursor-grabbing touch-pan-y`}
                 >
-                  {/* FRONT FACE (Card Details with NO "Unlock with PIN" text) */}
                   <div
-                    style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
-                    className={`absolute inset-0 rounded-2xl ${activeTheme.bg} ${activeTheme.text} p-4 sm:p-5 flex flex-col justify-between shadow-xl border ${activeTheme.border} overflow-hidden cursor-grab active:cursor-grabbing touch-pan-y`}
-                  >
-                    <div
-                      aria-hidden="true"
-                      className="pointer-events-none absolute -right-10 -bottom-10 w-44 h-44 rounded-full bg-white/[0.06] blur-xl"
-                    />
+                    aria-hidden="true"
+                    className="pointer-events-none absolute -right-10 -bottom-10 w-44 h-44 rounded-full bg-white/[0.06] blur-xl"
+                  />
 
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-xs font-semibold tracking-tight truncate">
-                          ▲ {activeCard.name}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setIsCardFlipped(true);
-                          }}
-                          title="Flip card to display UPI QR code & UPI details"
-                          className="px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-[10px] font-medium flex items-center gap-1 transition-colors cursor-pointer text-white"
-                        >
-                          <QrCode className="w-3 h-3 text-[#C5A059]" />
-                          <span>Flip to QR</span>
-                        </button>
-                        <Wifi className="w-4 h-4 opacity-80 rotate-90 shrink-0" />
-                      </div>
-                    </div>
-
-                    {/* Metallic Chip & Card Number (Pill removed completely: No 'Unlock with PIN' text) */}
-                    <div className="space-y-2 my-auto pt-1">
-                      <div className="flex items-center justify-between">
-                        <div
-                          className={`w-8 sm:w-9 h-5.5 sm:h-6 rounded-md bg-gradient-to-br ${activeTheme.chip} border border-white/25 opacity-90`}
-                        />
-                      </div>
-
-                      {/* Masked when locked, Full 16 digits when unlocked */}
-                      <div className="text-[12px] sm:text-[14px] tracking-[0.16em] sm:tracking-[0.18em] font-medium tabular-nums truncate">
-                        {isContentUnlocked
-                          ? `${activeCard.prefix4 || '4532'} ${activeCard.middleDigits || '8841 9200'} ${activeCard.last4}`
-                          : `•••• •••• •••• ${activeCard.last4}`}
-                      </div>
-                    </div>
-
-                    {/* Expiry, Holder & Network Badge */}
-                    <div className="flex items-end justify-between gap-2 pt-1">
-                      <div className="min-w-0">
-                        <div className={`text-[9px] ${activeTheme.subtext} tracking-wider`}>
-                          {isContentUnlocked ? `VALID ${activeCard.expiry}` : 'VALID ••/••'}
-                        </div>
-                        <div className="text-[10px] font-medium tracking-wider truncate max-w-[135px] sm:max-w-[145px] mt-0.5">
-                          {cardHolder}
-                        </div>
-                      </div>
-                      <div className="text-right leading-none shrink-0">
-                        <div className="text-sm sm:text-base font-bold italic tracking-wider">
-                          {activeCard.network}
-                        </div>
-                        <div className={`text-[8px] ${activeTheme.subtext} tracking-wide mt-0.5`}>
-                          {activeCard.tier}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* BACK FACE (Big QR Code & UPI Details - NAME & CVV REMOVED for clean payment display) */}
-                  <div
-                    style={{
-                      backfaceVisibility: 'hidden',
-                      WebkitBackfaceVisibility: 'hidden',
-                      transform: 'rotateY(180deg)',
-                    }}
-                    className={`absolute inset-0 rounded-2xl ${activeTheme.bg} ${activeTheme.text} p-3 sm:p-3.5 flex flex-col justify-between shadow-xl border ${activeTheme.border} overflow-hidden`}
-                  >
-                    {/* Magnetic Stripe Band with Quick QR Photo & Front Actions */}
-                    <div className="-mx-3 -mt-3 sm:-mx-3.5 sm:-mt-3.5 h-6 sm:h-7 bg-black/85 border-b border-white/10 flex items-center px-3 justify-between">
-                      <span className="text-[8px] tracking-[0.2em] font-mono text-white/50 uppercase">
-                        inflotrack Secure Vault
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-xs font-semibold tracking-tight truncate">
+                        ▲ {activeCard.name}
                       </span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenQrGalleryModal(activeCard);
-                          }}
-                          className="text-[9px] font-semibold text-[#C5A059] hover:text-[#D1AF6A] flex items-center gap-1 cursor-pointer bg-black/50 px-2 py-0.5 rounded border border-[#C5A059]/30 transition-colors"
-                          title="Upload or Choose QR Photo from Folder"
-                        >
-                          <Camera className="w-2.5 h-2.5" />
-                          <span>{activeCard.qrCodeImageUrl ? 'Change QR' : 'Add QR Photo'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsCardFlipped(false)}
-                          className="text-[9px] font-semibold text-white/80 hover:text-white flex items-center gap-1 cursor-pointer bg-black/50 px-2 py-0.5 rounded transition-colors"
-                        >
-                          <RotateCw className="w-2.5 h-2.5" />
-                          <span>Front</span>
-                        </button>
-                      </div>
                     </div>
-
-                    {/* BIG SIZE QR CODE (Custom Photo or Vector SVG) - Zero Name, Zero CVV */}
-                    <div className="flex-1 flex flex-col items-center justify-center my-auto py-1">
-                      <div
-                        onClick={() => {
-                          if (!isContentUnlocked) {
-                            handleRequestUnlockOnly();
-                          } else {
-                            setIsQrEnlargedModalOpen(true);
-                          }
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Direct QR Option Button on Card */}
+                      <button
+                        type="button"
+                        id="btn-card-qr-option"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsQrEnlargedModalOpen(true);
                         }}
-                        className={`w-28 h-28 sm:w-30 sm:h-30 p-1.5 rounded-xl bg-white shrink-0 relative overflow-hidden flex items-center justify-center shadow-md border border-white/40 cursor-pointer group transition-all hover:scale-[1.02] ${
-                          !isContentUnlocked ? 'cursor-pointer' : ''
-                        }`}
-                        title={
-                          isContentUnlocked
-                            ? 'Click to enlarge QR code full-screen'
-                            : 'Protected vault details · Click to unlock'
-                        }
+                        title="Display UPI QR code & payment details"
+                        className="px-2.5 py-1 rounded-lg bg-black/40 hover:bg-black/60 border border-white/20 text-[10.5px] font-semibold flex items-center gap-1.5 transition-all cursor-pointer text-white shadow-2xs active:scale-95"
                       >
-                        <div
-                          className={`w-full h-full flex items-center justify-center ${
-                            !isContentUnlocked ? 'filter blur-[4px] select-none pointer-events-none' : ''
-                          }`}
-                        >
-                          {activeCard.qrCodeImageUrl ? (
-                            <img
-                              src={activeCard.qrCodeImageUrl}
-                              alt={`QR code for ${activeCard.name}`}
-                              className="w-full h-full object-contain rounded-lg"
-                            />
-                          ) : (
-                            <UpiQrCodeSvg
-                              upiId={activeCard.qrCodeData || activeCard.upiId || 'inflotrack.vault@okaxis'}
-                              name={activeCard.name}
-                              className="w-full h-full"
-                            />
-                          )}
-                        </div>
-
-                        {/* Magnify hover badge when unlocked */}
-                        {isContentUnlocked && (
-                          <div className="absolute bottom-1 right-1 px-1 py-0.5 rounded bg-black/75 text-white text-[8px] font-medium flex items-center gap-0.5 opacity-85 group-hover:opacity-100 transition-opacity">
-                            <Maximize2 className="w-2.5 h-2.5 text-[#C5A059]" />
-                            <span>Zoom</span>
-                          </div>
-                        )}
-
-                        {/* Lock overlay when locked */}
-                        {!isContentUnlocked && (
-                          <div
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRequestUnlockOnly();
-                            }}
-                            className="absolute inset-0 bg-black/65 backdrop-blur-[1px] flex flex-col items-center justify-center p-1 text-center cursor-pointer"
-                            title="Protected vault details · Click to unlock"
-                          >
-                            <Lock className="w-4 h-4 text-[#C5A059] mb-0.5" />
-                            <span className="text-[8px] font-bold text-white tracking-wider uppercase">
-                              Tap to Unlock
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Bottom UPI ID & 1-Click Copy Bar */}
-                    <div className="flex items-center justify-between gap-1.5 px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 text-white">
-                      <div className="min-w-0 flex-1 flex items-center gap-1.5">
-                        <span className="text-[8.5px] font-medium uppercase tracking-wider opacity-65 shrink-0">
-                          UPI:
-                        </span>
-                        {isContentUnlocked ? (
-                          <span className="text-[10px] sm:text-[11px] font-mono font-semibold tracking-tight truncate">
-                            {activeCard.upiId || 'inflotrack.vault@okaxis'}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-mono tracking-widest opacity-60">
-                            ••••••••••••@•••
-                          </span>
-                        )}
-                      </div>
-
-                      {isContentUnlocked && (
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCopyUpi(activeCard.upiId || 'inflotrack.vault@okaxis');
-                            }}
-                            className="px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 text-[9px] font-semibold flex items-center gap-1 transition-colors cursor-pointer text-white"
-                            title="Copy UPI ID to clipboard"
-                          >
-                            {copiedUpi ? (
-                              <>
-                                <Check className="w-2.5 h-2.5 text-emerald-400" />
-                                <span>Copied</span>
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="w-2.5 h-2.5" />
-                                <span>Copy</span>
-                              </>
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setIsQrEnlargedModalOpen(true);
-                            }}
-                            className="p-1 rounded bg-white/20 hover:bg-white/30 text-white transition-colors cursor-pointer"
-                            title="View Fullscreen QR"
-                          >
-                            <Maximize2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      )}
+                        <QrCode className="w-3.5 h-3.5 text-[#C5A059]" />
+                        <span>QR Code</span>
+                      </button>
+                      <Wifi className="w-4 h-4 opacity-80 rotate-90 shrink-0" />
                     </div>
                   </div>
-                </motion.div>
+
+                  {/* Metallic Chip & Card Number */}
+                  <div className="space-y-2 my-auto pt-1">
+                    <div className="flex items-center justify-between">
+                      <div
+                        className={`w-8 sm:w-9 h-5.5 sm:h-6 rounded-md bg-gradient-to-br ${activeTheme.chip} border border-white/25 opacity-90`}
+                      />
+                    </div>
+
+                    {/* Masked when locked, Full 16 digits when unlocked */}
+                    <div className="text-[12px] sm:text-[14px] tracking-[0.16em] sm:tracking-[0.18em] font-medium tabular-nums truncate">
+                      {isContentUnlocked
+                        ? `${activeCard.prefix4 || '4532'} ${activeCard.middleDigits || '8841 9200'} ${activeCard.last4}`
+                        : `•••• •••• •••• ${activeCard.last4}`}
+                    </div>
+                  </div>
+
+                  {/* Expiry, Holder & Network Badge */}
+                  <div className="flex items-end justify-between gap-2 pt-1">
+                    <div className="min-w-0">
+                      <div className={`text-[9px] ${activeTheme.subtext} tracking-wider`}>
+                        {isContentUnlocked ? `VALID ${activeCard.expiry}` : 'VALID ••/••'}
+                      </div>
+                      <div className="text-[10px] font-medium tracking-wider truncate max-w-[135px] sm:max-w-[145px] mt-0.5">
+                        {cardHolder}
+                      </div>
+                    </div>
+                    <div className="text-right leading-none shrink-0">
+                      <div className="text-sm sm:text-base font-bold italic tracking-wider">
+                        {activeCard.network}
+                      </div>
+                      <div className={`text-[8px] ${activeTheme.subtext} tracking-wide mt-0.5`}>
+                        {activeCard.tier}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </motion.div>
             </AnimatePresence>
           </div>
@@ -1263,7 +1092,6 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                   key={c.id}
                   type="button"
                   onClick={() => {
-                    setIsCardFlipped(false);
                     handleSelectCardIndex(idx);
                   }}
                   aria-label={`View ${c.name}`}
@@ -1299,7 +1127,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                 Linked Payment Cards & Modes
               </h3>
               <p className="text-xs text-[#78746B] dark:text-[#9E9B92]">
-                Select any card to display, flip, and manage in the 3D card showcase
+                Select any card to display, view QR code, and manage in the card vault
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1331,7 +1159,6 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                     <div
                       key={card.id}
                       onClick={() => {
-                        setIsCardFlipped(false);
                         handleSelectCardIndex(indexInVault);
                       }}
                       className={`p-3 rounded-xl text-left flex items-center justify-between gap-3 transition-all cursor-pointer border ${
@@ -1399,7 +1226,6 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                     <div
                       key={card.id}
                       onClick={() => {
-                        setIsCardFlipped(false);
                         handleSelectCardIndex(indexInVault);
                       }}
                       className={`p-3 rounded-xl text-left flex items-center justify-between gap-3 transition-all cursor-pointer border ${

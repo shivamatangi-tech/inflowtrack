@@ -20,6 +20,7 @@ import {
   getNextMonthKey,
   getCurrentMonthKey,
 } from '../utils/formatters';
+import { getMonthSheetName } from '../services/sheets';
 
 interface DashboardMonthNavProps {
   selectedMonth: string;
@@ -85,8 +86,10 @@ export const DashboardMonthNav: React.FC<DashboardMonthNavProps> = ({
         >
           {formatMonthYear(selectedMonth)}
         </h2>
-        <div className="flex items-center gap-1.5 text-xs text-[#78746B] dark:text-[#9E9B92]">
-          <span>Private Ledger Period</span>
+        <div className="flex items-center gap-1.5 text-xs text-[#78746B] dark:text-[#9E9B92] flex-wrap">
+          <span className="inline-flex items-center gap-1 font-mono text-[11px] px-2 py-0.5 rounded-md bg-[#EFECE4] dark:bg-[#201F1B] text-[#5E5B52] dark:text-[#A39F95] border border-[#E0DCD3] dark:border-[#2C2A25]">
+            Sheet Tab: {getMonthSheetName(selectedMonth)}
+          </span>
           {!isCurrentMonth && (
             <>
               <span aria-hidden="true">·</span>

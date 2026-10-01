@@ -324,6 +324,8 @@ export async function saveSecurityRecoverySettings(
   settings: {
     question1?: string;
     answer1?: string;
+    question2?: string;
+    answer2?: string;
     inactivityTimeoutMinutes?: number;
     inactivityAction?: 'lock' | 'logout';
   }
@@ -345,12 +347,56 @@ export async function saveSecurityRecoverySettings(
   syncSecurityConfigMetadata({
     question1: data.question1,
     hasQuestion1Set: data.hasQuestion1Set,
+    question2: data.question2,
+    hasQuestion2Set: data.hasQuestion2Set,
     inactivityTimeoutMinutes: data.inactivityTimeoutMinutes,
     inactivityAction: data.inactivityAction,
   });
 
   return { success: true };
 }
+
+/**
+ * Saves inactivity settings to local security metadata and optionally to the backend.
+ */
+export function saveInactivitySettings(
+  timeoutMinutes: number,
+  inactivityAction: 'lock' | 'logout'
+): void {
+  syncSecurityConfigMetadata({
+    inactivityTimeoutMinutes: timeoutMinutes,
+    inactivityAction,
+  });
+}
+
+/**
+ * Saves security recovery questions to the backend server and updates local security metadata.
+ */
+export async function saveSecurityQuestionsWithServer(
+  authToken: string | null,
+  questions: {
+    question1: string;
+    answer1: string;
+    question2?: string;
+    answer2?: string;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  if (authToken) {
+    return saveSecurityRecoverySettings(authToken, questions);
+  }
+  syncSecurityConfigMetadata({
+    question1: questions.question1,
+    hasQuestion1Set: Boolean(questions.answer1),
+    question2: questions.question2,
+    hasQuestion2Set: Boolean(questions.answer2),
+  });
+  return { success: true };
+}
+
+/**
+ * Retrieves the stored security questions and inactivity configuration.
+ */
+export const getStoredSecurityQuestionConfig = getSecurityQuestions;
 
 export function resetSecurityPin(): void {
   scrubLegacyPlaintextSecurityStorage();

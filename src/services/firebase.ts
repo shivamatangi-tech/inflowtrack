@@ -30,6 +30,8 @@ import {
   updateProfile,
   reauthenticateWithCredential,
   EmailAuthProvider,
+  GoogleAuthProvider,
+  signInWithPopup,
   onAuthStateChanged,
   signOut,
   setPersistence,
@@ -45,9 +47,46 @@ import { scrubLegacyPlaintextSecurityStorage } from '../utils/security';
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
-// In-memory token and user cache
+// Google Auth Provider configured with Google Sheets and Google Drive permissions
+const googleProvider = new GoogleAuthProvider();
+googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
+googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
+googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+// In-memory token, Google OAuth token, and user cache
 let cachedToken: string | null = null;
+let cachedGoogleAccessToken: string | null = (() => {
+  try {
+    return sessionStorage.getItem('inflowtrack_google_access_token');
+  } catch {
+    return null;
+  }
+})();
 let cachedUser: GoogleUser | null = null;
+
+export function getGoogleAccessToken(): string | null {
+  if (!cachedGoogleAccessToken) {
+    try {
+      cachedGoogleAccessToken = sessionStorage.getItem('inflowtrack_google_access_token');
+    } catch {
+      // Ignore
+    }
+  }
+  return cachedGoogleAccessToken;
+}
+
+export function setGoogleAccessToken(token: string | null): void {
+  cachedGoogleAccessToken = token;
+  try {
+    if (token) {
+      sessionStorage.setItem('inflowtrack_google_access_token', token);
+    } else {
+      sessionStorage.removeItem('inflowtrack_google_access_token');
+    }
+  } catch {
+    // Ignore
+  }
+}
 
 /**
  * Maps technical Firebase Auth errors into clear, user-friendly messages.
@@ -234,6 +273,47 @@ export async function loginWithEmailPassword(
     }
     throw new Error(formatAuthErrorMessage(err, 'Sign in failed. Please check your email and password.'));
   }
+}
+
+/**
+ * Sign in using Google Workspace OAuth with full Google Sheets and Drive permissions.
+ */
+export async function signInWithGoogle(): Promise<{
+  user: GoogleUser;
+  token: string;
+  googleAccessToken: string;
+}> {
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const googleAccessToken = credential?.accessToken || '';
+    setGoogleAccessToken(googleAccessToken);
+
+    const idToken = await result.user.getIdToken(true);
+    const mappedUser = mapFirebaseUser(result.user);
+    cachedToken = idToken;
+    cachedUser = mappedUser;
+
+    return { user: mappedUser, token: idToken, googleAccessToken };
+  } catch (err: unknown) {
+    throw new Error(
+      formatAuthErrorMessage(
+        err,
+        'Failed to connect with Google. Please check your popup permissions and try again.'
+      )
+    );
+  }
+}
+
+/**
+ * Connects Google Workspace account to enable direct Google Sheets and Drive two-way sync.
+ */
+export async function connectGoogleAccount(): Promise<{
+  user: GoogleUser;
+  token: string;
+  googleAccessToken: string;
+}> {
+  return signInWithGoogle();
 }
 
 /**
@@ -611,6 +691,7 @@ export function initAuth(
 export async function logout(): Promise<void> {
   const token = cachedToken;
   cachedToken = null;
+  setGoogleAccessToken(null);
   cachedUser = null;
 
   try {

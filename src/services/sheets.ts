@@ -21,7 +21,7 @@ import {
 import { normalizeDateString } from '../utils/formatters';
 import { syncSecurityConfigMetadata, updateSecurityPinWithServer } from '../utils/security';
 import { syncTargetsFromSheet } from '../utils/targets';
-import { getFreshAuthToken } from './firebase';
+import { getFreshAuthToken, getGoogleAccessToken } from './firebase';
 
 export const TARGET_SPREADSHEET_NAME = 'inflowtrack';
 export const TARGET_DRIVE_FOLDER_NAME = 'inflowtrack';
@@ -128,12 +128,12 @@ export const DEFAULT_ACCOUNTS = [
   'UPI Wallet',
 ];
 
-const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+const SHORT_MONTH_NAMES_TITLE = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export function getMonthSheetName(rawDate?: string): string {
   if (!rawDate) {
     const now = new Date();
-    return `${MONTH_NAMES[now.getMonth()]}_${now.getFullYear()}`;
+    return `${SHORT_MONTH_NAMES_TITLE[now.getMonth()]}-${now.getFullYear()}`;
   }
   const normalized = normalizeDateString(rawDate);
   const parts = normalized.split('-');
@@ -141,11 +141,11 @@ export function getMonthSheetName(rawDate?: string): string {
     const year = parts[0];
     const monthIndex = parseInt(parts[1], 10) - 1;
     if (monthIndex >= 0 && monthIndex < 12) {
-      return `${MONTH_NAMES[monthIndex]}_${year}`;
+      return `${SHORT_MONTH_NAMES_TITLE[monthIndex]}-${year}`;
     }
   }
   const now = new Date();
-  return `${MONTH_NAMES[now.getMonth()]}_${now.getFullYear()}`;
+  return `${SHORT_MONTH_NAMES_TITLE[now.getMonth()]}-${now.getFullYear()}`;
 }
 
 export function extractFolderIdFromUrlOrId(rawInput: string): string {
@@ -199,10 +199,29 @@ async function buildAuthHeaders(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
   };
+  const googleToken = getGoogleAccessToken();
+  if (googleToken) {
+    headers['X-Google-Access-Token'] = googleToken;
+  }
   if (includeJsonContentType) {
     headers['Content-Type'] = 'application/json';
   }
   return headers;
+}
+
+/**
+ * Triggers bidirectional synchronization between the website and Google Sheets.
+ */
+export async function triggerTwoWaySync(
+  accessToken?: string | null
+): Promise<{
+  sheetInfo: SpreadsheetInfo;
+  categories: CategoryData;
+  transactions: Transaction[];
+  recurringTemplates: RecurringTemplate[];
+}> {
+  clearBootstrapCache();
+  return fetchFinanceBootstrap(accessToken || '', true);
 }
 
 // Short-lived in-memory bootstrap cache to avoid duplicate round-trips during loadData()

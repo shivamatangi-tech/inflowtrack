@@ -36,6 +36,7 @@ import {
   formatINR,
   formatDateToDDMMYYYY,
 } from '../utils/formatters';
+import { getMonthSheetName } from '../services/sheets';
 import { ConfirmationDialog } from './ConfirmationDialog';
 import { EditTransactionModal } from './EditTransactionModal';
 import { RecurringModal } from './RecurringModal';
@@ -367,13 +368,18 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
     >
       {/* 1. Header with "Transactions" Title and Responsive Action Buttons */}
       <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-[#EFECE6] dark:border-[#22221F] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center justify-between sm:justify-start gap-3">
+        <div className="flex items-center justify-between sm:justify-start gap-3 flex-wrap">
           <h3 className="font-display text-xl sm:text-2xl font-semibold text-[#181816] dark:text-[#F4F3EF] tracking-tight">
             Transactions
           </h3>
           <span className="text-xs font-medium text-[#8C8980] dark:text-[#78756E] tabular-nums">
             {scopedTransactions.length} {scopedTransactions.length === 1 ? 'item' : 'items'}
           </span>
+          {selectedMonth && (
+            <span className="inline-flex items-center gap-1 font-mono text-[11px] px-2 py-0.5 rounded-md bg-[#F4F3EF] dark:bg-[#22221F] text-[#78756E] dark:text-[#9C9990] border border-[#E2DFD9] dark:border-[#2C2A26]">
+              Sheet Tab: {getMonthSheetName(selectedMonth)}
+            </span>
+          )}
         </div>
 
         {/* Quick Action Tools: Responsive stack/grid on small mobile, row on tablet/desktop */}
@@ -663,6 +669,11 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
                                 {tx.subcategory}
                               </div>
                             )}
+                            {tx.transactionId && (
+                              <div className="text-[9.5px] font-mono text-[#A39F95] dark:text-[#78746B] truncate max-w-[140px]" title={`Google Sheet Record ID: ${tx.transactionId}`}>
+                                {tx.transactionId}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -795,9 +806,13 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
                         [tx.paymentMode, tx.accountWallet].filter(Boolean).join(' · ') ||
                         tx.type}
                     </div>
-                    <div className="text-[10px] text-[#A3A096] tabular-nums mt-0.5">
-                      {formatDateToDDMMYYYY(tx.date)}
-                      {tx.time ? `, ${tx.time}` : ''}
+                    <div className="text-[10px] text-[#A3A096] tabular-nums mt-0.5 flex items-center gap-1.5 flex-wrap">
+                      <span>{formatDateToDDMMYYYY(tx.date)}{tx.time ? `, ${tx.time}` : ''}</span>
+                      {tx.transactionId && (
+                        <span className="font-mono text-[9px] text-[#A39F95] dark:text-[#78746B] truncate max-w-[120px]">
+                          ID: {tx.transactionId}
+                        </span>
+                      )}
                     </div>
                   </div>
 

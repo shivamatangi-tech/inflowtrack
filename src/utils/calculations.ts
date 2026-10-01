@@ -375,65 +375,181 @@ export function calculateTrendData(
 }
 
 /**
+ * Normalizes any transaction date (e.g. "2026-09-26", "26-09-2026", "26/09/2026", "Sep-2026")
+ * into a standard year-month key "YYYY-MM".
+ */
+export function normalizeMonthKey(rawDate?: string): string | null {
+  if (!rawDate) return null;
+  const s = String(rawDate).trim();
+  if (!s) return null;
+
+  // YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+  const ymd = s.match(/^(\d{4})[-\/\.](\d{1,2})/);
+  if (ymd) {
+    const y = parseInt(ymd[1], 10);
+    const m = parseInt(ymd[2], 10);
+    if (m >= 1 && m <= 12) {
+      return `${y}-${String(m).padStart(2, '0')}`;
+    }
+  }
+
+  // DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
+  const dmy = s.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{4})/);
+  if (dmy) {
+    const y = parseInt(dmy[3], 10);
+    const m = parseInt(dmy[2], 10);
+    if (m >= 1 && m <= 12) {
+      return `${y}-${String(m).padStart(2, '0')}`;
+    }
+  }
+
+  // Named month format: Sep-2026, September 2026, sept-2026
+  const monthMap: Record<string, string> = {
+    jan: '01',
+    feb: '02',
+    mar: '03',
+    apr: '04',
+    may: '05',
+    jun: '06',
+    jul: '07',
+    aug: '08',
+    sep: '09',
+    oct: '10',
+    nov: '11',
+    dec: '12',
+  };
+  const named = s.match(/([a-zA-Z]+)[\s\-_]+(\d{4})/);
+  if (named) {
+    const prefix = named[1].toLowerCase().slice(0, 3);
+    if (monthMap[prefix]) {
+      return `${named[2]}-${monthMap[prefix]}`;
+    }
+  }
+
+  // ISO string fallback
+  try {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      return `${y}-${m}`;
+    }
+  } catch {
+    // Ignore
+  }
+
+  return null;
+}
+
+/**
  * Calculates month-by-month Income, Expenses, and Net Balance for comparison bar graphs.
- * Returns sorted chronologically.
+ * Returns sorted chronologically. Supports both 6M and 12M ranges, ensuring any transaction
+ * in the dataset is displayed as a visible bar.
  */
 export function calculateMonthlyComparison(
   transactions: Transaction[],
-  monthCount = 6
+  monthCount = 6,
+  selectedMonth?: string
 ): Array<{
   monthKey: string;
   label: string;
   income: number;
   expenses: number;
   net: number;
+  hasTransactions: boolean;
 }> {
-  // Collect all unique months or last N months
-  const monthMap = new Map<string, { income: number; expenses: number }>();
+  const monthMap = new Map<string, { income: number; expenses: number; count: number }>();
 
-  // Ensure current month and recent past months are in map
-  const today = new Date();
-  for (let i = monthCount - 1; i >= 0; i--) {
-    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const key = `${y}-${m}`;
-    monthMap.set(key, { income: 0, expenses: 0 });
-  }
-
-  // Aggregate transaction values
+  // 1. Process all transactions with robust date and type normalization
+  const txMonthKeys: string[] = [];
   for (const tx of transactions) {
-    if (!tx.date) continue;
-    const key = tx.date.substring(0, 7); // YYYY-MM
-    const amt = typeof tx.amount === 'number' && !isNaN(tx.amount) && tx.amount > 0 ? tx.amount : 0;
+    const monthKey = normalizeMonthKey(tx.date);
+    if (!monthKey) continue;
 
-    if (!monthMap.has(key)) {
-      monthMap.set(key, { income: 0, expenses: 0 });
+    txMonthKeys.push(monthKey);
+    if (!monthMap.has(monthKey)) {
+      monthMap.set(monthKey, { income: 0, expenses: 0, count: 0 });
     }
 
-    const current = monthMap.get(key)!;
-    if (tx.type === 'Income') {
+    const current = monthMap.get(monthKey)!;
+    current.count += 1;
+
+    const amt =
+      typeof tx.amount === 'number'
+        ? isNaN(tx.amount)
+          ? 0
+          : Math.max(0, tx.amount)
+        : Math.max(0, Number(tx.amount) || 0);
+
+    const typeLower = (tx.type || '').trim().toLowerCase();
+    if (typeLower === 'income') {
       current.income += amt;
-    } else if (tx.type === 'Expense') {
+    } else if (
+      typeLower === 'expense' ||
+      typeLower === 'savings' ||
+      typeLower === 'emergency fund' ||
+      typeLower === 'lent' ||
+      typeLower === 'borrowed' ||
+      typeLower === 'lent & borrowed'
+    ) {
       current.expenses += amt;
     }
   }
 
-  // Sort chronologically and take the last `monthCount`
-  const sortedKeys = Array.from(monthMap.keys()).sort();
-  const recentKeys = sortedKeys.slice(-Math.max(monthCount, 4));
+  // 2. Determine anchor reference month (latest between transactions, selectedMonth, and calendar today)
+  const today = new Date();
+  const currentCalKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
 
-  return recentKeys.map((key) => {
+  let anchorKey = currentCalKey;
+  if (selectedMonth && /^\d{4}-\d{2}$/.test(selectedMonth)) {
+    anchorKey = selectedMonth;
+  }
+  if (txMonthKeys.length > 0) {
+    const latestTxKey = [...txMonthKeys].sort().pop()!;
+    if (latestTxKey > anchorKey) {
+      anchorKey = latestTxKey;
+    }
+  }
+
+  // 3. Ensure at least `monthCount` consecutive calendar months ending at `anchorKey` exist
+  const [anchorY, anchorM] = anchorKey.split('-').map(Number);
+  for (let i = monthCount - 1; i >= 0; i--) {
+    const d = new Date(anchorY, anchorM - 1 - i, 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const key = `${y}-${m}`;
+    if (!monthMap.has(key)) {
+      monthMap.set(key, { income: 0, expenses: 0, count: 0 });
+    }
+  }
+
+  // 4. Sort chronologically and determine the window of length `monthCount`
+  const sortedKeys = Array.from(monthMap.keys()).sort();
+  const anchorIndex = sortedKeys.indexOf(anchorKey);
+
+  let sliceKeys: string[];
+  if (anchorIndex !== -1 && sortedKeys.length > monthCount) {
+    const startIdx = Math.max(0, anchorIndex - monthCount + 1);
+    sliceKeys = sortedKeys.slice(startIdx, startIdx + monthCount);
+    if (sliceKeys.length < monthCount) {
+      sliceKeys = sortedKeys.slice(-monthCount);
+    }
+  } else {
+    sliceKeys = sortedKeys.slice(-monthCount);
+  }
+
+  return sliceKeys.map((key) => {
     const [y, m] = key.split('-');
     const d = new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1);
     const label = d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
-    const data = monthMap.get(key) || { income: 0, expenses: 0 };
+    const data = monthMap.get(key) || { income: 0, expenses: 0, count: 0 };
     return {
       monthKey: key,
       label,
       income: data.income,
       expenses: data.expenses,
       net: data.income - data.expenses,
+      hasTransactions: data.count > 0,
     };
   });
 }
