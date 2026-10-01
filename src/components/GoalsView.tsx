@@ -50,6 +50,12 @@ import {
   RotateCw,
   Wallet,
   AlertCircle,
+  Camera,
+  Upload,
+  Image as ImageIcon,
+  Maximize2,
+  FolderOpen,
+  RefreshCw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -95,6 +101,7 @@ import {
   CardThemeFinish,
   CardNetwork,
   CardType,
+  removeColorNames,
 } from '../utils/customCards';
 import {
   hasSecurityPinSet,
@@ -447,11 +454,26 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
   const [editCardTheme, setEditCardTheme] = useState<CardThemeFinish>('obsidian');
   const [editCardUpi, setEditCardUpi] = useState('');
   const [editCardQrCodeData, setEditCardQrCodeData] = useState('');
+  const [editCardQrCodeImageUrl, setEditCardQrCodeImageUrl] = useState('');
   const [editCardCvv, setEditCardCvv] = useState('842');
   const [editCardError, setEditCardError] = useState<string | null>(null);
   const [editCardSuccess, setEditCardSuccess] = useState<string | null>(null);
   const [isDeleteCardConfirmOpen, setIsDeleteCardConfirmOpen] = useState<boolean>(false);
   const [isSavingCard, setIsSavingCard] = useState<boolean>(false);
+
+  // QR Photo Gallery & Folder Management state
+  const [isQrGalleryModalOpen, setIsQrGalleryModalOpen] = useState<boolean>(false);
+  const [qrGalleryFiles, setQrGalleryFiles] = useState<
+    Array<{ name: string; filename: string; url: string; sizeBytes: number; updatedAt: string }>
+  >([]);
+  const [isLoadingQrGallery, setIsLoadingQrGallery] = useState<boolean>(false);
+  const [isUploadingQrPhoto, setIsUploadingQrPhoto] = useState<boolean>(false);
+  const [qrUploadError, setQrUploadError] = useState<string | null>(null);
+  const [qrUploadSuccess, setQrUploadSuccess] = useState<string | null>(null);
+  const [targetCardForQrUpload, setTargetCardForQrUpload] = useState<VaultCardItem | null>(null);
+  const [isQrEnlargedModalOpen, setIsQrEnlargedModalOpen] = useState<boolean>(false);
+  const [qrModalTab, setQrModalTab] = useState<'upload' | 'folder'>('upload');
+  const [stagedPhotoPreview, setStagedPhotoPreview] = useState<{ dataUrl: string; name: string } | null>(null);
 
   const totalCards = vaultCards.length;
   const safeActiveIndex = totalCards > 0 ? ((activeCardIndex % totalCards) + totalCards) % totalCards : 0;
@@ -589,6 +611,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
     setEditCardTheme('obsidian');
     setEditCardUpi('');
     setEditCardQrCodeData('');
+    setEditCardQrCodeImageUrl('');
     setEditCardCvv('842');
     setEditCardError(null);
     setEditCardSuccess(null);
@@ -608,6 +631,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
     setEditCardTheme(card.theme || 'obsidian');
     setEditCardUpi(card.upiId || '');
     setEditCardQrCodeData(card.qrCodeData || '');
+    setEditCardQrCodeImageUrl(card.qrCodeImageUrl || '');
     setEditCardCvv(card.cvv || '842');
     setEditCardError(null);
     setEditCardSuccess(null);
@@ -651,6 +675,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
         theme: editCardTheme,
         upiId: cleanUpi,
         qrCodeData: cleanQr,
+        qrCodeImageUrl: editCardQrCodeImageUrl.trim() || undefined,
         cvv: cleanCvv,
       };
 
@@ -667,6 +692,154 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
       setEditCardError(err.message || 'Failed to save card changes.');
     } finally {
       setIsSavingCard(false);
+    }
+  };
+
+  // --------------------------------------------------------------------------
+  // QR PHOTO GALLERY & FOLDER UPLOAD LOGIC
+  // --------------------------------------------------------------------------
+  const handleFetchQrGallery = async () => {
+    setIsLoadingQrGallery(true);
+    setQrUploadError(null);
+    try {
+      const res = await fetch('/api/cards/qr-gallery');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.files)) {
+          setQrGalleryFiles(data.files);
+        }
+      }
+    } catch {
+      // Ignore network error
+    } finally {
+      setIsLoadingQrGallery(false);
+    }
+  };
+
+  const handleOpenQrGalleryModal = (card?: VaultCardItem) => {
+    setTargetCardForQrUpload(card || activeCard);
+    setQrUploadError(null);
+    setQrUploadSuccess(null);
+    setStagedPhotoPreview(null);
+    setQrModalTab('upload');
+    setIsQrGalleryModalOpen(true);
+    handleFetchQrGallery();
+  };
+
+  const handleFileChosenForQr = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setQrUploadError('Please select a valid image file (PNG, JPG, SVG, WebP).');
+      return;
+    }
+
+    if (file.size > 8 * 1024 * 1024) {
+      setQrUploadError('Image file size must be under 8MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) {
+        setStagedPhotoPreview({
+          dataUrl,
+          name: file.name,
+        });
+        setQrUploadError(null);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleApplyStagedOrFolderQr = async (chosenUrl?: string) => {
+    setQrUploadError(null);
+    const targetCard = targetCardForQrUpload || activeCard;
+    if (!targetCard) return;
+
+    setIsUploadingQrPhoto(true);
+    try {
+      let finalUrl = chosenUrl;
+
+      // If user uploaded a new photo from device, save to server /public/qr-codes/
+      if (!finalUrl && stagedPhotoPreview) {
+        const token = await getFreshAuthToken();
+        const uploadRes = await fetch('/api/cards/upload-qr', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            imageData: stagedPhotoPreview.dataUrl,
+            fileName: stagedPhotoPreview.name,
+          }),
+        });
+        if (!uploadRes.ok) {
+          const errData = await uploadRes.json().catch(() => ({}));
+          throw new Error(errData.error || 'Failed to upload QR photo.');
+        }
+        const data = await uploadRes.json();
+        finalUrl = data.url;
+      }
+
+      if (!finalUrl) {
+        setQrUploadError('Please choose or upload a QR photo first.');
+        setIsUploadingQrPhoto(false);
+        return;
+      }
+
+      // If currently editing card in Edit Card Modal, update form state
+      if (isEditCardOpen) {
+        setEditCardQrCodeImageUrl(finalUrl);
+      }
+
+      // Update card in vault and server
+      const token = await getFreshAuthToken();
+      const updatedCard: VaultCardItem = {
+        ...targetCard,
+        qrCodeImageUrl: finalUrl,
+      };
+      const updatedList = await saveCardToServer(updatedCard, token || undefined);
+      setVaultCards(updatedList);
+      setQrUploadSuccess('QR Code Photo applied to card back successfully!');
+      setTimeout(() => {
+        setIsQrGalleryModalOpen(false);
+        setQrUploadSuccess(null);
+        setStagedPhotoPreview(null);
+      }, 700);
+    } catch (err: any) {
+      setQrUploadError(err.message || 'Failed to save QR photo.');
+    } finally {
+      setIsUploadingQrPhoto(false);
+    }
+  };
+
+  const handleClearQrPhoto = async () => {
+    const targetCard = targetCardForQrUpload || activeCard;
+    if (!targetCard) return;
+
+    if (isEditCardOpen) {
+      setEditCardQrCodeImageUrl('');
+    }
+
+    try {
+      const token = await getFreshAuthToken();
+      const updatedCard: VaultCardItem = {
+        ...targetCard,
+        qrCodeImageUrl: undefined,
+      };
+      const updatedList = await saveCardToServer(updatedCard, token || undefined);
+      setVaultCards(updatedList);
+      setQrUploadSuccess('Reset to standard generated vector QR code.');
+      setTimeout(() => {
+        setIsQrGalleryModalOpen(false);
+        setQrUploadSuccess(null);
+      }, 600);
+    } catch (err: any) {
+      setQrUploadError(err.message || 'Failed to reset QR code.');
     }
   };
 
@@ -839,7 +1012,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                 exit={{ opacity: 0, x: swipeDirection * -42, scale: 0.96 }}
                 transition={{ duration: 0.22, ease: 'easeOut' }}
                 style={{ perspective: 1000 }}
-                className="relative z-10 w-[min(88%,292px)] h-[172px] sm:h-[180px]"
+                className="relative z-10 w-[min(90%,306px)] h-[184px] sm:h-[192px]"
               >
                 <motion.div
                   animate={{ rotateY: isCardFlipped ? 180 : 0 }}
@@ -917,7 +1090,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                     </div>
                   </div>
 
-                  {/* BACK FACE (QR Code & UPI Details - Masked in locked mode, revealed after PIN unlock) */}
+                  {/* BACK FACE (Big QR Code & UPI Details - NAME & CVV REMOVED for clean payment display) */}
                   <div
                     style={{
                       backfaceVisibility: 'hidden',
@@ -926,122 +1099,154 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                     }}
                     className={`absolute inset-0 rounded-2xl ${activeTheme.bg} ${activeTheme.text} p-3 sm:p-3.5 flex flex-col justify-between shadow-xl border ${activeTheme.border} overflow-hidden`}
                   >
-                    {/* Magnetic Stripe Band */}
+                    {/* Magnetic Stripe Band with Quick QR Photo & Front Actions */}
                     <div className="-mx-3 -mt-3 sm:-mx-3.5 sm:-mt-3.5 h-6 sm:h-7 bg-black/85 border-b border-white/10 flex items-center px-3 justify-between">
                       <span className="text-[8px] tracking-[0.2em] font-mono text-white/50 uppercase">
                         inflotrack Secure Vault
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => setIsCardFlipped(false)}
-                        className="text-[9px] font-semibold text-[#C5A059] hover:text-[#D1AF6A] flex items-center gap-1 cursor-pointer bg-black/50 px-2 py-0.5 rounded"
-                      >
-                        <RotateCw className="w-2.5 h-2.5" />
-                        <span>Card Front</span>
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenQrGalleryModal(activeCard);
+                          }}
+                          className="text-[9px] font-semibold text-[#C5A059] hover:text-[#D1AF6A] flex items-center gap-1 cursor-pointer bg-black/50 px-2 py-0.5 rounded border border-[#C5A059]/30 transition-colors"
+                          title="Upload or Choose QR Photo from Folder"
+                        >
+                          <Camera className="w-2.5 h-2.5" />
+                          <span>{activeCard.qrCodeImageUrl ? 'Change QR' : 'Add QR Photo'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsCardFlipped(false)}
+                          className="text-[9px] font-semibold text-white/80 hover:text-white flex items-center gap-1 cursor-pointer bg-black/50 px-2 py-0.5 rounded transition-colors"
+                        >
+                          <RotateCw className="w-2.5 h-2.5" />
+                          <span>Front</span>
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Signature Strip & CVV Row */}
-                    <div className="flex items-center justify-between gap-2 mt-0.5 px-0.5">
-                      <div className="flex-1 h-5 bg-white/90 rounded px-2 text-[10px] text-zinc-900 font-serif italic flex items-center overflow-hidden tracking-wider select-none truncate">
-                        {cardHolder}
-                      </div>
-                      <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-black/40 border border-white/15 shrink-0">
-                        <span className="text-[8px] font-medium tracking-wider text-white/70">CVV</span>
-                        <span className="text-[11px] font-mono font-bold tracking-widest text-[#C5A059]">
-                          {isContentUnlocked ? (activeCard.cvv || '842') : '•••'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* UPI QR Code & Payment Information Box */}
-                    <div className="flex items-center gap-2.5 mt-1 p-2 rounded-xl bg-black/35 border border-white/10">
-                      {/* QR Code Container (Masked when locked, crisp when unlocked) */}
+                    {/* BIG SIZE QR CODE (Custom Photo or Vector SVG) - Zero Name, Zero CVV */}
+                    <div className="flex-1 flex flex-col items-center justify-center my-auto py-1">
                       <div
                         onClick={() => {
                           if (!isContentUnlocked) {
                             handleRequestUnlockOnly();
+                          } else {
+                            setIsQrEnlargedModalOpen(true);
                           }
                         }}
-                        className={`w-14 h-14 sm:w-16 sm:h-16 p-1 rounded-lg bg-white shrink-0 relative overflow-hidden flex items-center justify-center ${
+                        className={`w-28 h-28 sm:w-30 sm:h-30 p-1.5 rounded-xl bg-white shrink-0 relative overflow-hidden flex items-center justify-center shadow-md border border-white/40 cursor-pointer group transition-all hover:scale-[1.02] ${
                           !isContentUnlocked ? 'cursor-pointer' : ''
                         }`}
+                        title={
+                          isContentUnlocked
+                            ? 'Click to enlarge QR code full-screen'
+                            : 'Protected vault details · Click to unlock'
+                        }
                       >
                         <div
-                          className={`w-full h-full ${
-                            !isContentUnlocked ? 'filter blur-[3.5px] select-none pointer-events-none' : ''
+                          className={`w-full h-full flex items-center justify-center ${
+                            !isContentUnlocked ? 'filter blur-[4px] select-none pointer-events-none' : ''
                           }`}
                         >
-                          <UpiQrCodeSvg
-                            upiId={activeCard.qrCodeData || activeCard.upiId || 'inflotrack.vault@okaxis'}
-                            name={activeCard.name}
-                            className="w-full h-full"
-                          />
+                          {activeCard.qrCodeImageUrl ? (
+                            <img
+                              src={activeCard.qrCodeImageUrl}
+                              alt={`QR code for ${activeCard.name}`}
+                              className="w-full h-full object-contain rounded-lg"
+                            />
+                          ) : (
+                            <UpiQrCodeSvg
+                              upiId={activeCard.qrCodeData || activeCard.upiId || 'inflotrack.vault@okaxis'}
+                              name={activeCard.name}
+                              className="w-full h-full"
+                            />
+                          )}
                         </div>
+
+                        {/* Magnify hover badge when unlocked */}
+                        {isContentUnlocked && (
+                          <div className="absolute bottom-1 right-1 px-1 py-0.5 rounded bg-black/75 text-white text-[8px] font-medium flex items-center gap-0.5 opacity-85 group-hover:opacity-100 transition-opacity">
+                            <Maximize2 className="w-2.5 h-2.5 text-[#C5A059]" />
+                            <span>Zoom</span>
+                          </div>
+                        )}
+
+                        {/* Lock overlay when locked */}
                         {!isContentUnlocked && (
                           <div
                             onClick={(e) => {
                               e.stopPropagation();
                               handleRequestUnlockOnly();
                             }}
-                            className="absolute inset-0 bg-black/65 backdrop-blur-[1px] flex flex-col items-center justify-center p-0.5 text-center cursor-pointer"
+                            className="absolute inset-0 bg-black/65 backdrop-blur-[1px] flex flex-col items-center justify-center p-1 text-center cursor-pointer"
                             title="Protected vault details · Click to unlock"
                           >
-                            <Lock className="w-3.5 h-3.5 text-[#C5A059] mb-0.5" />
-                            <span className="text-[7.5px] font-bold text-white tracking-wider uppercase">
-                              Protected
+                            <Lock className="w-4 h-4 text-[#C5A059] mb-0.5" />
+                            <span className="text-[8px] font-bold text-white tracking-wider uppercase">
+                              Tap to Unlock
                             </span>
                           </div>
                         )}
                       </div>
+                    </div>
 
-                      {/* UPI Details */}
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[8.5px] font-medium uppercase tracking-wider opacity-70">
-                          UPI Payment ID
-                        </div>
+                    {/* Bottom UPI ID & 1-Click Copy Bar */}
+                    <div className="flex items-center justify-between gap-1.5 px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 text-white">
+                      <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                        <span className="text-[8.5px] font-medium uppercase tracking-wider opacity-65 shrink-0">
+                          UPI:
+                        </span>
                         {isContentUnlocked ? (
-                          <>
-                            <div className="text-[10px] sm:text-[11px] font-mono font-semibold tracking-tight truncate mt-0.5">
-                              {activeCard.upiId || 'inflotrack.vault@okaxis'}
-                            </div>
-                            <div className="flex items-center gap-1.5 mt-1">
-                              <button
-                                type="button"
-                                onClick={() => handleCopyUpi(activeCard.upiId || 'inflotrack.vault@okaxis')}
-                                className="px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 text-[9px] font-semibold flex items-center gap-1 transition-colors cursor-pointer text-white"
-                              >
-                                {copiedUpi ? (
-                                  <>
-                                    <Check className="w-2.5 h-2.5 text-emerald-400" />
-                                    <span>Copied!</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Copy className="w-2.5 h-2.5" />
-                                    <span>Copy UPI</span>
-                                  </>
-                                )}
-                              </button>
-                              <span className="text-[8px] opacity-60">Scan to pay</span>
-                            </div>
-                          </>
+                          <span className="text-[10px] sm:text-[11px] font-mono font-semibold tracking-tight truncate">
+                            {activeCard.upiId || 'inflotrack.vault@okaxis'}
+                          </span>
                         ) : (
-                          <>
-                            <div className="text-[10px] font-mono tracking-widest opacity-60 mt-0.5">
-                              ••••••••••••@•••
-                            </div>
-                            <div
-                              onClick={handleRequestUnlockOnly}
-                              className="mt-1 inline-flex items-center gap-1 text-[8.5px] font-medium text-white/70 hover:text-[#C5A059] transition-colors cursor-pointer"
-                              title="Protected vault details · Click to unlock"
-                            >
-                              <Lock className="w-2.5 h-2.5 text-[#C5A059]" />
-                              <span>Protected</span>
-                            </div>
-                          </>
+                          <span className="text-[10px] font-mono tracking-widest opacity-60">
+                            ••••••••••••@•••
+                          </span>
                         )}
                       </div>
+
+                      {isContentUnlocked && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCopyUpi(activeCard.upiId || 'inflotrack.vault@okaxis');
+                            }}
+                            className="px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 text-[9px] font-semibold flex items-center gap-1 transition-colors cursor-pointer text-white"
+                            title="Copy UPI ID to clipboard"
+                          >
+                            {copiedUpi ? (
+                              <>
+                                <Check className="w-2.5 h-2.5 text-emerald-400" />
+                                <span>Copied</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-2.5 h-2.5" />
+                                <span>Copy</span>
+                              </>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsQrEnlargedModalOpen(true);
+                            }}
+                            className="p-1 rounded bg-white/20 hover:bg-white/30 text-white transition-colors cursor-pointer"
+                            title="View Fullscreen QR"
+                          >
+                            <Maximize2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </motion.div>
@@ -1471,11 +1676,11 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {[
-                    { id: 'obsidian', label: 'Obsidian Black', color: 'bg-[#181816]' },
-                    { id: 'champagne', label: 'Champagne Gold', color: 'bg-[#C5A059]' },
-                    { id: 'navy', label: 'Sovereign Navy', color: 'bg-[#1E293B]' },
-                    { id: 'platinum', label: 'Warm Platinum', color: 'bg-[#DCD8CF]' },
-                    { id: 'espresso', label: 'Deep Espresso', color: 'bg-[#2E1E17]' },
+                    { id: 'obsidian', label: 'Obsidian', color: 'bg-[#181816]' },
+                    { id: 'champagne', label: 'Champagne', color: 'bg-[#C5A059]' },
+                    { id: 'navy', label: 'Navy', color: 'bg-[#1E293B]' },
+                    { id: 'platinum', label: 'Platinum', color: 'bg-[#DCD8CF]' },
+                    { id: 'espresso', label: 'Espresso', color: 'bg-[#2E1E17]' },
                   ].map((thm) => {
                     const isSelected = editCardTheme === thm.id;
                     return (
@@ -1490,7 +1695,7 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                         }`}
                       >
                         <span className="text-[11px] font-medium text-[#141412] dark:text-[#F6F5F0]">
-                          {thm.label}
+                          {removeColorNames(thm.label)}
                         </span>
                         <span className={`w-3.5 h-3.5 rounded-full ${thm.color} border border-white/20 shrink-0`} />
                       </button>
@@ -1515,58 +1720,56 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
                     value={editCardUpi}
                     onChange={(e) => setEditCardUpi(e.target.value)}
                     placeholder="e.g. salary.hdfc@upi or name.vault@okaxis"
-                    className="w-full min-h-[42px] pl-3.5 pr-22 py-2 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-mono font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
+                    className="w-full min-h-[42px] px-3.5 py-2 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-mono font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
                   />
-                  {editCardUpi && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const cleanUpi = editCardUpi.trim();
-                        const cleanName = editCardName.trim() || 'Vault User';
-                        setEditCardQrCodeData(`upi://pay?pa=${cleanUpi}&pn=${encodeURIComponent(cleanName)}&cu=INR`);
-                      }}
-                      className="absolute right-2 top-2 px-2 py-1 rounded-md bg-[#E5E0D4] dark:bg-[#2C2A25] text-[10px] font-semibold text-[#8E7952] dark:text-[#C5A059] hover:bg-[#D5D0C5] transition-colors cursor-pointer"
-                      title="Auto-format UPI QR payload link"
-                    >
-                      Auto QR
-                    </button>
-                  )}
                 </div>
-                <p className="text-[10px] text-[#78746B] dark:text-[#9E9B92] mt-1">
-                  Shown when flipped in the 3D showcase. Tapping "Auto QR" generates the NPCI payment link.
-                </p>
               </div>
 
-              {/* 6. UPI QR Code Configuration & Live Visual Preview */}
+              {/* 6. Custom QR Code Photo (Rendered Big Size on Back of Card) */}
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-semibold text-[#141412] dark:text-[#F6F5F0]">
-                    QR Code Payload &amp; Preview
-                  </label>
-                  <span className="text-[10px] text-[#8E7952] dark:text-[#C5A059] font-medium">
-                    Live SVG Generator
-                  </span>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      value={editCardQrCodeData}
-                      onChange={(e) => setEditCardQrCodeData(e.target.value)}
-                      placeholder="upi://pay?pa=name@upi&pn=Vault&cu=INR"
-                      className="w-full min-h-[42px] px-3.5 py-2 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-mono font-medium text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
-                    />
-                    <p className="text-[10px] text-[#78746B] dark:text-[#9E9B92] mt-1">
-                      Rendered on the back of the card. Scan with GPay, PhonePe, or Paytm.
+                <label className="block text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] mb-1.5">
+                  QR Code Photo
+                </label>
+                <div className="flex items-center gap-3 p-3 bg-[#F6F5F0] dark:bg-[#22211D] rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25]">
+                  {editCardQrCodeImageUrl ? (
+                    <div className="w-14 h-14 p-1 bg-white rounded-lg border border-[#E5E0D4] dark:border-[#2C2A25] shrink-0 overflow-hidden flex items-center justify-center">
+                      <img
+                        src={editCardQrCodeImageUrl}
+                        alt="Card QR"
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-14 h-14 bg-[#E5E0D4]/50 dark:bg-[#2C2A25] rounded-lg border border-dashed border-[#C5A059]/40 shrink-0 flex items-center justify-center text-[#8E7952] dark:text-[#C5A059]">
+                      <Camera className="w-6 h-6 opacity-60" />
+                    </div>
+                  )}
+
+                  <div className="flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenQrGalleryModal()}
+                        className="px-3 py-1.5 rounded-lg bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{editCardQrCodeImageUrl ? 'Change QR Photo' : 'Upload QR Photo'}</span>
+                      </button>
+
+                      {editCardQrCodeImageUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setEditCardQrCodeImageUrl('')}
+                          className="px-2.5 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-[11px] font-semibold hover:bg-rose-100 flex items-center gap-1 transition-colors cursor-pointer border border-rose-200 dark:border-rose-900/60"
+                        >
+                          <X className="w-3 h-3" />
+                          <span>Remove Photo</span>
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-[#78746B] dark:text-[#9E9B92]">
+                      Upload your payment QR image or select from your photo folder.
                     </p>
-                  </div>
-                  {/* Live QR Code Box */}
-                  <div className="w-16 h-16 p-1 bg-white rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] shadow-xs shrink-0 flex items-center justify-center">
-                    <UpiQrCodeSvg
-                      upiId={editCardQrCodeData || editCardUpi || 'inflotrack.vault@okaxis'}
-                      name={editCardName || 'Vault User'}
-                      className="w-full h-full"
-                    />
                   </div>
                 </div>
               </div>
@@ -2516,6 +2719,370 @@ export const GoalsView: React.FC<GoalsViewProps> = ({
           setPendingDeleteTx(null);
         }}
       />
+
+      {/* ------------------------------------------------------------- */}
+      {/* ENLARGED FULL-SCREEN QR CODE MODAL FOR QUICK SCANNING        */}
+      {/* ------------------------------------------------------------- */}
+      {isQrEnlargedModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white dark:bg-[#161614] rounded-3xl max-w-sm w-full p-6 border border-[#E5E0D4] dark:border-[#2C2A25] shadow-2xl relative text-center">
+            <button
+              type="button"
+              onClick={() => setIsQrEnlargedModalOpen(false)}
+              className="absolute top-4 right-4 w-9 h-9 rounded-full bg-[#F6F5F0] dark:bg-[#22211D] text-[#78746B] hover:text-[#141412] dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="mb-4">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#8E7952] dark:text-[#C5A059]">
+                Scan &amp; Pay
+              </span>
+              <h3 className="font-display text-xl font-bold text-[#141412] dark:text-[#F6F5F0] mt-0.5">
+                {activeCard.name}
+              </h3>
+              <p className="text-[11px] text-[#78746B] dark:text-[#9E9B92]">
+                Compatible with Google Pay, PhonePe, Paytm &amp; BHIM
+              </p>
+            </div>
+
+            {/* Giant Centered QR Code Box */}
+            <div className="w-64 h-64 sm:w-72 sm:h-72 mx-auto p-4 bg-white rounded-2xl shadow-lg border border-black/10 flex items-center justify-center overflow-hidden mb-4">
+              {activeCard.qrCodeImageUrl ? (
+                <img
+                  src={activeCard.qrCodeImageUrl}
+                  alt={`QR code for ${activeCard.name}`}
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <UpiQrCodeSvg
+                  upiId={activeCard.qrCodeData || activeCard.upiId || 'inflotrack.vault@okaxis'}
+                  name={activeCard.name}
+                  className="w-full h-full"
+                />
+              )}
+            </div>
+
+            {/* UPI ID Pill & Copy Button */}
+            <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] mb-4">
+              <div className="min-w-0 text-left">
+                <div className="text-[9px] font-semibold text-[#8E7952] dark:text-[#C5A059] uppercase">
+                  UPI ID
+                </div>
+                <div className="text-xs font-mono font-bold text-[#141412] dark:text-[#F6F5F0] truncate">
+                  {activeCard.upiId || 'inflotrack.vault@okaxis'}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleCopyUpi(activeCard.upiId || 'inflotrack.vault@okaxis')}
+                className="px-3 py-1.5 rounded-lg bg-[#141412] dark:bg-[#C5A059] text-white dark:text-[#111110] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+              >
+                {copiedUpi ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy UPI</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-[#E5E0D4] dark:border-[#282622]">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsQrEnlargedModalOpen(false);
+                  handleOpenQrGalleryModal(activeCard);
+                }}
+                className="text-xs font-semibold text-[#8E7952] dark:text-[#C5A059] hover:underline flex items-center gap-1.5 cursor-pointer py-1.5"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>Change QR Photo</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsQrEnlargedModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#F6F5F0] dark:bg-[#22211D] hover:bg-[#EAE7DC] text-[#141412] dark:text-[#F6F5F0] transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* QR PHOTO UPLOAD & PROJECT FOLDER GALLERY MODAL                */}
+      {/* ------------------------------------------------------------- */}
+      {isQrGalleryModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white dark:bg-[#161614] rounded-3xl max-w-md w-full p-5 sm:p-6 border border-[#E5E0D4] dark:border-[#2C2A25] shadow-2xl relative max-h-[92vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-[#E5E0D4] dark:border-[#2C2A25] shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] flex items-center justify-center text-[#8E7952] dark:text-[#C5A059]">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#141412] dark:text-[#F6F5F0]">
+                    Card QR Code Photo
+                  </h3>
+                  <p className="text-[11px] text-[#78746B] dark:text-[#9E9B92]">
+                    Back of {targetCardForQrUpload?.name || activeCard.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsQrGalleryModalOpen(false);
+                  setStagedPhotoPreview(null);
+                  setQrUploadError(null);
+                  setQrUploadSuccess(null);
+                }}
+                className="w-8 h-8 rounded-full bg-[#F6F5F0] dark:bg-[#22211D] text-[#78746B] hover:text-[#141412] dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Error / Success Banners */}
+            {qrUploadError && (
+              <div className="my-2.5 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{qrUploadError}</span>
+              </div>
+            )}
+            {qrUploadSuccess && (
+              <div className="my-2.5 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                <Check className="w-4 h-4 shrink-0" />
+                <span>{qrUploadSuccess}</span>
+              </div>
+            )}
+
+            {/* Navigation Tabs */}
+            <div className="grid grid-cols-2 gap-1.5 p-1 my-3 bg-[#F6F5F0] dark:bg-[#22211D] rounded-xl border border-[#E5E0D4] dark:border-[#2C2A25] shrink-0">
+              <button
+                type="button"
+                onClick={() => setQrModalTab('upload')}
+                className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  qrModalTab === 'upload'
+                    ? 'bg-white dark:bg-[#161614] text-[#141412] dark:text-[#F6F5F0] shadow-xs'
+                    : 'text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-[#F6F5F0]'
+                }`}
+              >
+                <Upload className="w-3.5 h-3.5 text-[#C5A059]" />
+                <span>Upload from Device</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setQrModalTab('folder');
+                  handleFetchQrGallery();
+                }}
+                className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  qrModalTab === 'folder'
+                    ? 'bg-white dark:bg-[#161614] text-[#141412] dark:text-[#F6F5F0] shadow-xs'
+                    : 'text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-[#F6F5F0]'
+                }`}
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-[#C5A059]" />
+                <span>Project Folder ({qrGalleryFiles.length})</span>
+              </button>
+            </div>
+
+            {/* Tab Body */}
+            <div className="flex-1 overflow-y-auto pr-0.5 space-y-3">
+              {qrModalTab === 'upload' ? (
+                <div className="space-y-3">
+                  {/* File Dropzone */}
+                  <label className="border-2 border-dashed border-[#E5E0D4] dark:border-[#2C2A25] hover:border-[#C5A059] rounded-2xl p-5 flex flex-col items-center justify-center text-center cursor-pointer transition-colors bg-[#F6F5F0]/50 dark:bg-[#1C1C19]/50 group">
+                    <input
+                      type="file"
+                      accept="image/*,.png,.jpg,.jpeg,.svg,.webp"
+                      onChange={handleFileChosenForQr}
+                      className="hidden"
+                    />
+                    <div className="w-12 h-12 rounded-xl bg-white dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] flex items-center justify-center text-[#8E7952] dark:text-[#C5A059] mb-2 group-hover:scale-105 transition-transform shadow-xs">
+                      <Camera className="w-6 h-6" />
+                    </div>
+                    <span className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0]">
+                      Click or drop your QR code photo
+                    </span>
+                    <span className="text-[10px] text-[#78746B] dark:text-[#9E9B92] mt-0.5">
+                      Supports PNG, JPG, JPEG, SVG, WebP (up to 8MB)
+                    </span>
+                  </label>
+
+                  {/* Staged Image Preview */}
+                  {stagedPhotoPreview ? (
+                    <div className="p-3 rounded-2xl bg-[#F6F5F0] dark:bg-[#1E1E1B] border border-[#C5A059]/40 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0]">
+                          Selected Photo Preview:
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setStagedPhotoPreview(null)}
+                          className="text-[10px] text-rose-600 hover:underline cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+
+                      <div className="w-40 h-40 mx-auto p-2 bg-white rounded-xl shadow-md border border-black/10 flex items-center justify-center overflow-hidden">
+                        <img
+                          src={stagedPhotoPreview.dataUrl}
+                          alt="Staged QR Code"
+                          className="w-full h-full object-contain rounded-lg"
+                        />
+                      </div>
+
+                      <p className="text-[10px] text-center text-[#78746B] dark:text-[#9E9B92]">
+                        {stagedPhotoPreview.name}
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={() => handleApplyStagedOrFolderQr()}
+                        disabled={isUploadingQrPhoto}
+                        className="w-full min-h-[42px] px-4 py-2 rounded-xl bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {isUploadingQrPhoto ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Check className="w-4 h-4" />
+                        )}
+                        <span>Save &amp; Apply to Card Back</span>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                /* Tab 2: Project Folder Gallery */
+                <div className="space-y-3">
+                  <div className="p-3 rounded-2xl bg-[#F6F5F0] dark:bg-[#1E1E1B] border border-[#E5E0D4] dark:border-[#2C2A25]">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] flex items-center gap-1.5">
+                        <FolderOpen className="w-3.5 h-3.5 text-[#C5A059]" />
+                        <span>Folder: /public/qr-codes/</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleFetchQrGallery}
+                        disabled={isLoadingQrGallery}
+                        className="text-[10px] font-semibold text-[#8E7952] dark:text-[#C5A059] hover:underline flex items-center gap-1 cursor-pointer"
+                        title="Re-scan directory"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isLoadingQrGallery ? 'animate-spin' : ''}`} />
+                        <span>Refresh</span>
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-[#78746B] dark:text-[#9E9B92]">
+                      You can drop QR code photos directly into the <code>/public/qr-codes/</code> folder in this project, and they appear here instantly.
+                    </p>
+                  </div>
+
+                  {isLoadingQrGallery ? (
+                    <div className="py-8 flex flex-col items-center justify-center text-center">
+                      <Loader2 className="w-6 h-6 animate-spin text-[#C5A059] mb-2" />
+                      <span className="text-xs text-[#78746B] dark:text-[#9E9B92]">
+                        Scanning /public/qr-codes/...
+                      </span>
+                    </div>
+                  ) : qrGalleryFiles.length === 0 ? (
+                    <div className="py-8 flex flex-col items-center justify-center text-center bg-[#F6F5F0]/50 dark:bg-[#1C1C19]/50 rounded-2xl p-4">
+                      <ImageIcon className="w-8 h-8 text-[#78746B] dark:text-[#9E9B92] mb-1.5 opacity-60" />
+                      <span className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0]">
+                        No images found in /public/qr-codes/
+                      </span>
+                      <p className="text-[10px] text-[#78746B] dark:text-[#9E9B92] mt-0.5">
+                        Switch to "Upload from Device" tab to upload your QR photo!
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {qrGalleryFiles.map((file) => {
+                        const isCurrentlyActive =
+                          (targetCardForQrUpload?.qrCodeImageUrl || activeCard.qrCodeImageUrl) === file.url;
+                        return (
+                          <div
+                            key={file.filename}
+                            onClick={() => handleApplyStagedOrFolderQr(file.url)}
+                            className={`p-2.5 rounded-2xl border flex flex-col items-center text-center gap-1.5 transition-all cursor-pointer group ${
+                              isCurrentlyActive
+                                ? 'border-[#C5A059] ring-2 ring-[#C5A059]/40 bg-[#F6F5F0] dark:bg-[#22211D]'
+                                : 'border-[#E5E0D4] dark:border-[#2C2A25] bg-white dark:bg-[#1C1C19] hover:border-[#C5A059]/60'
+                            }`}
+                          >
+                            <div className="w-20 h-20 p-1.5 bg-white rounded-xl shadow-xs border border-black/10 flex items-center justify-center overflow-hidden">
+                              <img
+                                src={file.url}
+                                alt={file.name}
+                                className="w-full h-full object-contain"
+                              />
+                            </div>
+                            <span className="text-[11px] font-semibold text-[#141412] dark:text-[#F6F5F0] truncate max-w-full">
+                              {file.name}
+                            </span>
+                            <span className="text-[9px] text-[#78746B] dark:text-[#9E9B92]">
+                              {(file.sizeBytes / 1024).toFixed(0)} KB
+                            </span>
+                            <span
+                              className={`text-[9.5px] font-semibold px-2 py-0.5 rounded-md ${
+                                isCurrentlyActive
+                                  ? 'bg-[#C5A059] text-[#111110]'
+                                  : 'bg-[#F6F5F0] dark:bg-[#2C2A25] text-[#8E7952] dark:text-[#C5A059] group-hover:bg-[#C5A059] group-hover:text-[#111110]'
+                              }`}
+                            >
+                              {isCurrentlyActive ? 'Active on Card' : 'Apply to Card'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-3 border-t border-[#E5E0D4] dark:border-[#2C2A25] flex items-center justify-between gap-2 shrink-0">
+              {(targetCardForQrUpload?.qrCodeImageUrl || activeCard.qrCodeImageUrl) ? (
+                <button
+                  type="button"
+                  onClick={handleClearQrPhoto}
+                  className="text-xs text-rose-600 dark:text-rose-400 font-medium hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Use Standard Vector QR</span>
+                </button>
+              ) : (
+                <span className="text-[10px] text-[#78746B] dark:text-[#9E9B92]">
+                  Using auto-generated vector QR
+                </span>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsQrGalleryModalOpen(false);
+                  setStagedPhotoPreview(null);
+                }}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-medium text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-white transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

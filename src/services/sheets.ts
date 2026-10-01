@@ -287,6 +287,39 @@ export async function readTransactions(accessToken: string, _spreadsheetId?: str
 }
 
 /**
+ * Updates Google Sheets synchronization settings (Spreadsheet ID, Sheet Name, or Apps Script URL)
+ * and immediately reconciles changes bidirectionally with the Google Sheet.
+ */
+export async function updateSyncConfig(
+  accessToken: string | null | undefined,
+  config: {
+    spreadsheetId?: string;
+    spreadsheetName?: string;
+    appsScriptUrl?: string;
+  }
+): Promise<{ sheetInfo: SpreadsheetInfo; success: boolean }> {
+  try {
+    const headers = await buildAuthHeaders(accessToken, true);
+    const res = await fetch('/api/finance/sync-config', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(config),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to update Google Sheets synchronization settings.');
+    }
+    lastBootstrapCache = null;
+    return {
+      sheetInfo: data.sheetInfo as SpreadsheetInfo,
+      success: true,
+    };
+  } catch (error) {
+    throw formatUserFriendlyError(error, 'Failed to update Google Sheets synchronization settings.');
+  }
+}
+
+/**
  * Updates the Google Drive folder location where the `inflowtrack` sheet and backups are stored,
  * and optionally creates a new `inflowtrack` sheet inside that folder.
  */

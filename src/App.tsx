@@ -568,26 +568,6 @@ export default function App() {
           <div className="max-w-7xl mx-auto flex items-center justify-between text-xs font-medium text-emerald-800 dark:text-emerald-300">
             <div className="flex items-center gap-2 flex-wrap">
               <span>{sheetActionNotice}</span>
-              {sheetInfo?.driveFolderUrl && (
-                <a
-                  href={sheetInfo.driveFolderUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline font-bold text-emerald-900 dark:text-emerald-200 hover:text-emerald-700"
-                >
-                  Open Drive Folder
-                </a>
-              )}
-              {sheetInfo?.url && (
-                <a
-                  href={sheetInfo.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline font-bold text-emerald-900 dark:text-emerald-200 hover:text-emerald-700"
-                >
-                  Open inflowtrack Sheet
-                </a>
-              )}
             </div>
             <button
               type="button"

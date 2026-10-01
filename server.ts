@@ -520,8 +520,12 @@ function isGoogleCloudConfigured(userGoogleToken?: string): boolean {
   return Boolean((GOOGLE_SPREADSHEET_ID || GOOGLE_DRIVE_FOLDER_ID || userGoogleToken) && hasGoogleCredentials(userGoogleToken));
 }
 
-function isAppsScriptConfigured(): boolean {
-  return Boolean(GOOGLE_APPS_SCRIPT_URL);
+function getAppsScriptUrl(driveCfg?: UserDriveConfigRecord): string {
+  return driveCfg?.appsScriptUrl || GOOGLE_APPS_SCRIPT_URL;
+}
+
+function isAppsScriptConfigured(driveCfg?: UserDriveConfigRecord): boolean {
+  return Boolean(getAppsScriptUrl(driveCfg));
 }
 
 async function getServerGoogleAccessToken(userGoogleToken?: string): Promise<string> {
@@ -703,6 +707,7 @@ interface UserDriveConfigRecord {
   spreadsheetId: string;
   spreadsheetName: string;
   spreadsheetUrl?: string;
+  appsScriptUrl?: string;
   updatedAt: string;
 }
 
@@ -719,6 +724,7 @@ interface StoredVaultCard {
   theme: 'obsidian' | 'champagne' | 'navy' | 'platinum' | 'espresso';
   upiId?: string;
   qrCodeData?: string;
+  qrCodeImageUrl?: string;
   cvv?: string;
   isDefault?: boolean;
   updatedAt?: string;
@@ -1621,9 +1627,10 @@ async function syncFromLiveGoogleSheetsIfConfigured(
   const targetFolderId = driveCfg?.driveFolderId || GOOGLE_DRIVE_FOLDER_ID;
   const targetSheetName = driveCfg?.spreadsheetName || GOOGLE_SPREADSHEET_NAME;
 
-  if (isAppsScriptConfigured()) {
+  if (isAppsScriptConfigured(driveCfg)) {
     try {
-      const res = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+      const appsScriptUrl = getAppsScriptUrl(driveCfg);
+      const res = await fetch(appsScriptUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1638,9 +1645,27 @@ async function syncFromLiveGoogleSheetsIfConfigured(
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.transactions)) {
+          const remoteTxs: StoredTransactionRow[] = data.transactions.map((t: any, idx: number) => ({
+            rowIndex: t.rowIndex || idx + 2,
+            sheetName: t.sheetName || getMonthSheetName(t.date),
+            date: normalizeSheetDate(t.date || ''),
+            time: t.time || '09:00',
+            type: t.type || 'Expense',
+            category: t.category || 'Uncategorized',
+            subcategory: t.subcategory || '',
+            amount: typeof t.amount === 'number' ? t.amount : parseFloat(String(t.amount || '0').replace(/[₹$,\s]/g, '')) || 0,
+            paymentMode: t.paymentMode || 'HDFC Bank',
+            account: t.account || 'Primary Bank Account',
+            description: t.description || '',
+            uid,
+            transactionId: t.transactionId || `tx-apps-${idx}-${t.date}`,
+            createdAt: t.createdAt || new Date().toISOString(),
+            updatedAt: t.updatedAt || new Date().toISOString(),
+          }));
+
           wb.transactions = [
             ...wb.transactions.filter((t) => t.uid !== uid),
-            ...data.transactions.filter((t: any) => t.uid === uid),
+            ...remoteTxs,
           ];
           saveWorkbook(wb);
         }
@@ -1709,7 +1734,7 @@ async function syncFromLiveGoogleSheetsIfConfigured(
         const amount = parseFloat(rawAmount);
         const paymentMode = String(row[4] || 'HDFC Bank').trim();
         const description = String(row[5] || '').trim();
-        const rowUid = String(row[6] || '').trim() || wb.primaryOwnerUid || uid;
+        const rowUid = String(row[6] || '').trim();
         const transactionId = String(row[7] || `tx-${sheetTitle}-${rowIndex}-${date}`).trim();
         const subcategory = String(row[8] || '').trim();
         const account = String(row[9] || 'Primary Bank Account').trim();
@@ -1717,8 +1742,9 @@ async function syncFromLiveGoogleSheetsIfConfigured(
         const createdAt = String(row[11] || new Date().toISOString()).trim();
         const updatedAt = String(row[12] || createdAt).trim();
 
-        // Enforce strict UID ownership
-        if (rowUid === uid && date && !isNaN(amount) && amount > 0) {
+        // Enforce UID ownership or accept unassigned rows created directly in Google Sheet
+        const isOwned = !rowUid || rowUid === uid || (wb.primaryOwnerUid === uid);
+        if (isOwned && date && !isNaN(amount) && amount > 0) {
           fetchedForUser.push({
             rowIndex,
             sheetName: sheetTitle,
@@ -1731,7 +1757,7 @@ async function syncFromLiveGoogleSheetsIfConfigured(
             paymentMode,
             account,
             description,
-            uid: rowUid,
+            uid,
             transactionId,
             createdAt,
             updatedAt,
@@ -1741,13 +1767,18 @@ async function syncFromLiveGoogleSheetsIfConfigured(
     }
 
     if (fetchedForUser.length > 0) {
+      const scannedSheets = new Set(txSheetTitles);
+      const untouchedTxs = wb.transactions.filter(
+        (t) => t.uid === uid && !scannedSheets.has(t.sheetName)
+      );
       wb.transactions = [
         ...wb.transactions.filter((t) => t.uid !== uid),
+        ...untouchedTxs,
         ...fetchedForUser,
       ];
       saveWorkbook(wb);
     } else if (wb.transactions.some((t) => t.uid === uid)) {
-      // If the newly created Google Sheet in Drive is empty, push existing user transactions into it
+      // If the newly created Google Sheet is empty, push existing user transactions into it
       await populateFullWorkbookToLiveSheet(accessToken, spreadsheetId, wb, uid);
       saveWorkbook(wb);
     }
@@ -1802,13 +1833,59 @@ async function syncFromLiveGoogleSheetsIfConfigured(
   }
 }
 
+async function findRowInLiveGoogleSheet(
+  accessToken: string,
+  spreadsheetId: string,
+  sheetTitle: string,
+  tx: StoredTransactionRow
+): Promise<number | null> {
+  try {
+    const url = `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(sheetTitle)}!A2:H?valueRenderOption=FORMATTED_VALUE`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const rows: string[][] = data.values || [];
+
+    if (tx.transactionId) {
+      for (let i = 0; i < rows.length; i++) {
+        if (String(rows[i][7] || '').trim() === tx.transactionId) {
+          return i + 2;
+        }
+      }
+    }
+
+    const formattedDate = formatDateToDDMMYYYY(tx.date);
+    for (let i = 0; i < rows.length; i++) {
+      const rDate = String(rows[i][0] || '').trim();
+      const rType = String(rows[i][1] || '').trim();
+      const rCat = String(rows[i][2] || '').trim();
+      const rawAmt = String(rows[i][3] || '0').replace(/[₹$,\s]/g, '');
+      const rAmt = parseFloat(rawAmt);
+      if (
+        (rDate === tx.date || rDate === formattedDate) &&
+        rType.toLowerCase() === tx.type.toLowerCase() &&
+        rCat.toLowerCase() === tx.category.toLowerCase() &&
+        Math.abs(rAmt - tx.amount) < 0.01
+      ) {
+        return i + 2;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function appendToLiveGoogleSheetIfConfigured(
   tx: StoredTransactionRow,
   userGoogleToken?: string,
   driveCfg?: UserDriveConfigRecord
 ): Promise<void> {
-  if (isAppsScriptConfigured()) {
-    const res = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+  if (isAppsScriptConfigured(driveCfg)) {
+    const appsScriptUrl = getAppsScriptUrl(driveCfg);
+    const res = await fetch(appsScriptUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1934,9 +2011,10 @@ async function updateInLiveGoogleSheetIfConfigured(
   userGoogleToken?: string,
   driveCfg?: UserDriveConfigRecord
 ): Promise<void> {
-  if (isAppsScriptConfigured()) {
+  if (isAppsScriptConfigured(driveCfg)) {
     try {
-      await fetch(GOOGLE_APPS_SCRIPT_URL, {
+      const appsScriptUrl = getAppsScriptUrl(driveCfg);
+      await fetch(appsScriptUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1965,6 +2043,9 @@ async function updateInLiveGoogleSheetIfConfigured(
     });
     if (!spreadsheetId) return;
 
+    const targetRow = await findRowInLiveGoogleSheet(accessToken, spreadsheetId, tx.sheetName, tx);
+    const rowNumber = targetRow || tx.rowIndex;
+
     const rowValues = [
       formatDateToDDMMYYYY(tx.date),
       tx.type,
@@ -1982,9 +2063,7 @@ async function updateInLiveGoogleSheetIfConfigured(
     ];
 
     await fetch(
-      `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(tx.sheetName)}!A${tx.rowIndex}:M${
-        tx.rowIndex
-      }?valueInputOption=USER_ENTERED`,
+      `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(tx.sheetName)}!A${rowNumber}:M${rowNumber}?valueInputOption=USER_ENTERED`,
       {
         method: 'PUT',
         headers: {
@@ -2007,9 +2086,10 @@ async function deleteFromLiveGoogleSheetIfConfigured(
 ): Promise<void> {
   if (deletedTxs.length === 0) return;
 
-  if (isAppsScriptConfigured()) {
+  if (isAppsScriptConfigured(driveCfg)) {
     try {
-      await fetch(GOOGLE_APPS_SCRIPT_URL, {
+      const appsScriptUrl = getAppsScriptUrl(driveCfg);
+      await fetch(appsScriptUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2018,7 +2098,6 @@ async function deleteFromLiveGoogleSheetIfConfigured(
           spreadsheetName: driveCfg?.spreadsheetName || GOOGLE_SPREADSHEET_NAME,
           driveFolderId: driveCfg?.driveFolderId || GOOGLE_DRIVE_FOLDER_ID,
           uid,
-          rowIndices: deletedTxs.map((t) => t.rowIndex),
           transactionIds: deletedTxs.map((t) => t.transactionId),
         }),
       });
@@ -2040,10 +2119,10 @@ async function deleteFromLiveGoogleSheetIfConfigured(
     if (!spreadsheetId) return;
 
     for (const tx of deletedTxs) {
+      const targetRow = await findRowInLiveGoogleSheet(accessToken, spreadsheetId, tx.sheetName, tx);
+      const rowNumber = targetRow || tx.rowIndex;
       await fetch(
-        `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(tx.sheetName)}!A${tx.rowIndex}:M${
-          tx.rowIndex
-        }:clear`,
+        `${SHEETS_BASE_URL}/${spreadsheetId}/values/${encodeURIComponent(tx.sheetName)}!A${rowNumber}:M${rowNumber}:clear`,
         {
           method: 'POST',
           headers: { Authorization: `Bearer ${accessToken}` },
@@ -2202,6 +2281,12 @@ async function startServer() {
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     next();
   });
+
+  const QR_CODES_DIR = path.resolve(process.cwd(), 'public/qr-codes');
+  if (!fs.existsSync(QR_CODES_DIR)) {
+    fs.mkdirSync(QR_CODES_DIR, { recursive: true });
+  }
+  app.use('/qr-codes', express.static(QR_CODES_DIR));
 
   // --------------------------------------------------------------------------
   // 1. AUTHENTICATION ENDPOINTS (Personal Email + Password Auth & Token Verification)
@@ -2774,6 +2859,7 @@ async function startServer() {
         theme: ['obsidian', 'champagne', 'navy', 'platinum', 'espresso'].includes(card.theme) ? card.theme : 'obsidian',
         upiId: String(card.upiId || '').trim(),
         qrCodeData: String(card.qrCodeData || '').trim(),
+        qrCodeImageUrl: String(card.qrCodeImageUrl || '').trim(),
         cvv: String(card.cvv || '842').replace(/\D/g, '').slice(0, 4),
         isDefault: Boolean(card.isDefault),
         updatedAt: now,
@@ -2847,6 +2933,84 @@ async function startServer() {
   });
 
   // --------------------------------------------------------------------------
+  // QR CODE PHOTOS FOLDER GALLERY & DIRECT IMAGE UPLOADS
+  // (Stores into /public/qr-codes/ so user can upload/manage photos for cards)
+  // --------------------------------------------------------------------------
+
+  app.get('/api/cards/qr-gallery', (_req: Request, res: Response) => {
+    try {
+      const qrDir = path.resolve(process.cwd(), 'public/qr-codes');
+      if (!fs.existsSync(qrDir)) {
+        fs.mkdirSync(qrDir, { recursive: true });
+      }
+      const files = fs.readdirSync(qrDir);
+      const validExts = ['.png', '.jpg', '.jpeg', '.svg', '.webp'];
+      const images = files
+        .filter((file) => validExts.some((ext) => file.toLowerCase().endsWith(ext)))
+        .map((file) => {
+          const filePath = path.join(qrDir, file);
+          const stats = fs.statSync(filePath);
+          return {
+            name: file.replace(/[-_]/g, ' ').replace(/\.[^/.]+$/, ''),
+            filename: file,
+            url: `/qr-codes/${encodeURIComponent(file)}`,
+            sizeBytes: stats.size,
+            updatedAt: stats.mtime.toISOString(),
+          };
+        })
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+      res.json({ files: images });
+    } catch {
+      res.status(500).json({ error: 'Failed to read QR codes gallery.' });
+    }
+  });
+
+  app.post('/api/cards/upload-qr', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { imageData, fileName } = req.body || {};
+      if (!imageData || typeof imageData !== 'string') {
+        res.status(400).json({ error: 'Image data is required.' });
+        return;
+      }
+
+      const qrDir = path.resolve(process.cwd(), 'public/qr-codes');
+      if (!fs.existsSync(qrDir)) {
+        fs.mkdirSync(qrDir, { recursive: true });
+      }
+
+      // Check if it's base64 data URL
+      const match = imageData.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
+      let buffer: Buffer;
+      let extension = 'png';
+
+      if (match) {
+        let type = match[1].toLowerCase();
+        if (type === 'svg+xml') type = 'svg';
+        if (type === 'jpeg') type = 'jpg';
+        extension = type;
+        buffer = Buffer.from(match[2], 'base64');
+      } else {
+        // Raw base64 string
+        buffer = Buffer.from(imageData, 'base64');
+      }
+
+      const cleanBase = fileName
+        ? String(fileName).toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0, 30)
+        : 'qr_photo';
+      const safeName = `${cleanBase}_${Date.now()}.${extension}`;
+      const targetPath = path.join(qrDir, safeName);
+
+      fs.writeFileSync(targetPath, buffer);
+
+      const url = `/qr-codes/${encodeURIComponent(safeName)}`;
+      res.json({ success: true, url, filename: safeName });
+    } catch {
+      res.status(500).json({ error: 'Failed to upload QR photo to project folder.' });
+    }
+  });
+
+  // --------------------------------------------------------------------------
   // 2. GOOGLE SHEETS FINANCE DATABASE ENDPOINTS (STRICTLY SCOPED TO VERIFIED UID)
   // --------------------------------------------------------------------------
 
@@ -2890,10 +3054,10 @@ async function startServer() {
       const driveCfg = wb.userDriveConfigs[uid];
       const recurringList = wb.recurringTemplates.filter((r) => r.uid === uid);
 
-      const connectionMode = isGoogleCloudConfigured(req.googleAccessToken)
-        ? 'google_sheets_api'
-        : isAppsScriptConfigured()
+      const connectionMode = isAppsScriptConfigured(driveCfg)
         ? 'apps_script'
+        : isGoogleCloudConfigured(req.googleAccessToken)
+        ? 'google_sheets_api'
         : 'local_sheet_workbook';
 
       const activeSheetId = driveCfg?.spreadsheetId || wb.spreadsheetId;
@@ -2908,9 +3072,6 @@ async function startServer() {
           id: activeSheetId,
           name: driveCfg?.spreadsheetName || wb.spreadsheetName || GOOGLE_SPREADSHEET_NAME,
           url: activeSheetUrl,
-          driveFolderId: driveCfg?.driveFolderId || GOOGLE_DRIVE_FOLDER_ID,
-          driveFolderName: driveCfg?.driveFolderName || GOOGLE_DRIVE_FOLDER_NAME,
-          driveFolderUrl: driveCfg?.driveFolderUrl || GOOGLE_DRIVE_FOLDER_URL,
           createdTime: new Date().toISOString(),
           transactionsCount: userTxs.length,
           connectionMode,
@@ -2954,6 +3115,64 @@ async function startServer() {
       res.status(503).json({
         error: 'Google Sheets database is temporarily unavailable. Please try again shortly.',
       });
+    }
+  });
+
+  // Centralized Google Sheets Sync Configuration & Manual Trigger
+  app.post('/api/finance/sync-config', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const uid = req.user!.uid;
+      const { spreadsheetId, spreadsheetName, appsScriptUrl } = req.body || {};
+      const wb = loadWorkbook();
+      ensureUserRecords(wb, uid);
+
+      if (!wb.userDriveConfigs[uid]) {
+        wb.userDriveConfigs[uid] = {
+          uid,
+          driveFolderId: GOOGLE_DRIVE_FOLDER_ID,
+          driveFolderUrl: GOOGLE_DRIVE_FOLDER_URL,
+          driveFolderName: GOOGLE_DRIVE_FOLDER_NAME,
+          spreadsheetId: spreadsheetId || GOOGLE_SPREADSHEET_ID,
+          spreadsheetName: spreadsheetName || GOOGLE_SPREADSHEET_NAME,
+          spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId || GOOGLE_SPREADSHEET_ID}/edit`,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
+      if (spreadsheetId && typeof spreadsheetId === 'string' && spreadsheetId.trim()) {
+        const cleanId = spreadsheetId.trim().replace(/^https?:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+).*/, '$1');
+        wb.userDriveConfigs[uid].spreadsheetId = cleanId;
+        wb.userDriveConfigs[uid].spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${cleanId}/edit`;
+      }
+      if (spreadsheetName && typeof spreadsheetName === 'string' && spreadsheetName.trim()) {
+        wb.userDriveConfigs[uid].spreadsheetName = spreadsheetName.trim();
+      }
+      if (appsScriptUrl !== undefined && typeof appsScriptUrl === 'string') {
+        wb.userDriveConfigs[uid].appsScriptUrl = appsScriptUrl.trim();
+      }
+      wb.userDriveConfigs[uid].updatedAt = new Date().toISOString();
+
+      await syncFromLiveGoogleSheetsIfConfigured(wb, uid, req.googleAccessToken);
+      saveWorkbook(wb);
+
+      const activeCfg = wb.userDriveConfigs[uid];
+      res.json({
+        success: true,
+        sheetInfo: {
+          id: activeCfg.spreadsheetId,
+          name: activeCfg.spreadsheetName,
+          url: activeCfg.spreadsheetUrl,
+          connectionMode: isAppsScriptConfigured(activeCfg)
+            ? 'apps_script'
+            : isGoogleCloudConfigured(req.googleAccessToken)
+            ? 'google_sheets_api'
+            : 'local_sheet_workbook',
+          lastSyncedAt: new Date().toISOString(),
+          transactionsCount: wb.transactions.filter((t) => t.uid === uid).length,
+        },
+      });
+    } catch {
+      res.status(500).json({ error: 'Failed to update Google Sheets synchronization settings.' });
     }
   });
 

@@ -401,7 +401,7 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
               }
             }}
             disabled={isDownloadingSheet}
-            title="Store in Google Drive folder (1WTHHDzwzO79ypcP06ZmDkBuDADosnH30) and download inflowtrack sheet"
+            title="Export and download inflowtrack spreadsheet"
             className="min-h-[42px] py-2 px-4 bg-[#181816] hover:bg-[#2A2A26] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-white dark:text-[#111110] rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
           >
             <Download className="w-3.5 h-3.5 shrink-0" />

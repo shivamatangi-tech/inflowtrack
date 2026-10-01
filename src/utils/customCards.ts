@@ -32,6 +32,7 @@ export interface VaultCardItem {
   theme: CardThemeFinish;
   upiId?: string;
   qrCodeData?: string;
+  qrCodeImageUrl?: string;
   cvv?: string;
   isDefault?: boolean;
 }
@@ -43,6 +44,17 @@ export function getCardType(card: VaultCardItem): CardType {
     return 'Credit';
   }
   return 'Debit';
+}
+
+/**
+ * Removes verbose or redundant color words from theme/finish descriptions
+ * e.g. "Obsidian Black" -> "Obsidian", "Champagne Gold" -> "Champagne"
+ */
+export function removeColorNames(label: string): string {
+  if (!label) return '';
+  return label
+    .replace(/\b(Black|Gold|Blue|Grey|Gray|Brown|White|Silver|Metallic|Edition|Color|Colour)\b/gi, '')
+    .trim();
 }
 
 const STORAGE_KEY = 'inflotrack_custom_cards_v1';
