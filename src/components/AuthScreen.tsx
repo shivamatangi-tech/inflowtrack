@@ -3,46 +3,32 @@
  * File: src/components/AuthScreen.tsx
  * Application: inflowtrack — Track Save Grow
  * Purpose:
- *   Authentication screen supporting unique Username + PIN sign-in, account
- *   registration with unique username, and side-by-side Sign In & Register
- *   buttons at the bottom of the screen.
- *
- * Security Architecture & Guarantees:
- *   1. Plaintext passwords or PINs are NEVER stored in Firebase or database.
- *   2. Cryptographically hashed using PBKDF2-HMAC-SHA256 (100,000 iterations).
- *   3. All sensitive operations (editing, deleting, changing UPI ID, modifying
- *      QR code) are protected behind authentication.
+ *   Clean, frictionless, modern authentication screen.
+ *   Removes unnecessary PIN keypads and complicated login options.
+ *   Supports direct 1-click Google Sign-In and standard Username/Password
+ *   with automatic Google Sheets API initialization upon sign-in.
  * ============================================================================
  */
 
 import React, { useState, useEffect } from 'react';
 import {
+  User,
+  Lock,
   Eye,
   EyeOff,
-  CheckCircle2,
-  AlertCircle,
   Loader2,
-  Wallet,
+  AlertCircle,
+  CheckCircle2,
+  ArrowRight,
   ShieldCheck,
   FileSpreadsheet,
-  PieChart,
-  KeyRound,
-  User,
-  Mail,
-  Lock,
-  UserPlus,
-  LogIn,
-  Info,
-  X,
-  CreditCard,
-  QrCode,
-  Shield,
 } from 'lucide-react';
 import {
-  loginWithUsernameAndPin,
-  registerWithUsernameAndPin,
-  loginWithEmailPassword,
+  loginWithUsernameAndPassword,
+  registerWithUsernameAndPassword,
   signInWithGoogle,
+  connectGoogleAccount,
+  getGoogleAccessToken,
 } from '../services/firebase';
 import { GoogleUser } from '../types';
 
@@ -59,7 +45,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   isLoading: externalLoading = false,
   errorMessage: externalError,
 }) => {
-  // Check remembered username or email
   const savedUsername = (() => {
     try {
       return (
@@ -73,309 +58,153 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   })();
 
   const [mode, setMode] = useState<AuthMode>('signin');
-  const [loginOption, setLoginOption] = useState<'username' | 'email'>(() =>
-    savedUsername.includes('@') ? 'email' : 'username'
-  );
-  const [username, setUsername] = useState<string>(savedUsername);
-  const [pin, setPin] = useState<string>('');
-  const [confirmPin, setConfirmPin] = useState<string>('');
-  const [displayName, setDisplayName] = useState<string>('');
+  const [usernameOrEmail, setUsernameOrEmail] = useState<string>(savedUsername);
   const [password, setPassword] = useState<string>('');
-  const [usePasswordInstead, setUsePasswordInstead] = useState<boolean>(false);
+  const [confirmPassword, setConfirmPassword] = useState<string>('');
+  const [displayName, setDisplayName] = useState<string>('');
   const [rememberMe, setRememberMe] = useState<boolean>(true);
-  const [showPin, setShowPin] = useState<boolean>(false);
   const [showPassword, setShowPassword] = useState<boolean>(false);
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isGoogleConnecting, setIsGoogleConnecting] = useState<boolean>(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [isArchModalOpen, setIsArchModalOpen] = useState<boolean>(false);
 
-  const isBusy = isSubmitting || externalLoading;
+  const isBusy = isSubmitting || isGoogleConnecting || externalLoading;
   const activeError = localError || externalError;
 
   const handleModeChange = (newMode: AuthMode) => {
     setMode(newMode);
     setLocalError(null);
     setSuccessMessage(null);
-    setPin('');
-    setConfirmPin('');
     setPassword('');
-    setUsePasswordInstead(false);
+    setConfirmPassword('');
   };
 
-  const handlePinDigitClick = (digit: string) => {
-    if (mode === 'signin') {
-      if (pin.length < 4) {
-        setPin((prev) => prev + digit);
-        setLocalError(null);
-      }
-    } else {
-      if (pin.length < 4) {
-        setPin((prev) => prev + digit);
-        setLocalError(null);
-      } else if (confirmPin.length < 4) {
-        setConfirmPin((prev) => prev + digit);
-        setLocalError(null);
-      }
-    }
-  };
-
-  const handlePinBackspace = () => {
-    if (mode === 'signin') {
-      setPin((prev) => prev.slice(0, -1));
-    } else {
-      if (confirmPin.length > 0) {
-        setConfirmPin((prev) => prev.slice(0, -1));
-      } else {
-        setPin((prev) => prev.slice(0, -1));
-      }
-    }
-    setLocalError(null);
-  };
-
-  const executeSignIn = async () => {
+  /**
+   * 1-Click Google Sign-In: Authenticates user and gets Google Sheets access in 1 click
+   */
+  const handleGoogleSignIn = async () => {
+    setIsGoogleConnecting(true);
     setLocalError(null);
     setSuccessMessage(null);
 
-    const clean = username.trim().toLowerCase();
-    const cleanIdentifier = clean.includes('@')
-      ? clean.replace(/[^a-z0-9_@.\+-]/g, '')
-      : clean.replace(/[^a-z0-9_-]/g, '');
+    try {
+      const res = await signInWithGoogle();
+      setSuccessMessage('Successfully connected with Google! Loading your workspace...');
+      if (onAuthSuccess) {
+        await onAuthSuccess(res.user, res.token);
+      }
+    } catch (err: any) {
+      setLocalError(err.message || 'Google sign in failed. Please try again.');
+    } finally {
+      setIsGoogleConnecting(false);
+    }
+  };
 
+  /**
+   * Username / Password Sign In with Automatic Google Sheets Initialization
+   */
+  const handleUsernamePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLocalError(null);
+    setSuccessMessage(null);
+
+    const cleanIdentifier = usernameOrEmail.trim();
     if (!cleanIdentifier) {
-      setLocalError(
-        loginOption === 'email'
-          ? 'Please enter your email ID.'
-          : 'Please enter your username.'
-      );
+      setLocalError('Please enter your username or email address.');
       return;
     }
 
-    if (usePasswordInstead) {
-      if (!password) {
-        setLocalError('Please enter your account password.');
+    if (!password) {
+      setLocalError('Please enter your password.');
+      return;
+    }
+
+    if (mode === 'register') {
+      if (cleanIdentifier.length < 3) {
+        setLocalError('Username must be at least 3 characters long.');
         return;
       }
+      if (password.length < 6) {
+        setLocalError('Password must be at least 6 characters long.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setLocalError('Passwords do not match. Please verify your password.');
+        return;
+      }
+
       setIsSubmitting(true);
       try {
-        const emailFallback = cleanIdentifier.includes('@')
-          ? cleanIdentifier
-          : `${cleanIdentifier}@inflowtrack.app`;
-        const authResult = await loginWithEmailPassword(emailFallback, password, rememberMe);
-        if (rememberMe) {
-          try {
-            if (cleanIdentifier.includes('@')) {
-              localStorage.setItem('inflowtrack_saved_email', cleanIdentifier);
-              localStorage.removeItem('inflowtrack_saved_username');
-            } else {
-              localStorage.setItem('inflowtrack_saved_username', cleanIdentifier);
-              localStorage.removeItem('inflowtrack_saved_email');
-            }
-          } catch {
-            // Ignore
-          }
-        }
+        const regResult = await registerWithUsernameAndPassword(
+          cleanIdentifier,
+          password,
+          displayName.trim() || undefined,
+          rememberMe
+        );
+
+        setSuccessMessage('Account created successfully! Initializing workspace...');
+
         if (onAuthSuccess) {
-          await onAuthSuccess(authResult.user, authResult.token);
+          await onAuthSuccess(regResult.user, regResult.token);
         }
       } catch (err: any) {
-        setLocalError(err.message || 'Sign in failed. Please verify your credentials.');
+        setLocalError(err.message || 'Registration failed. This username may already be in use.');
       } finally {
         setIsSubmitting(false);
       }
       return;
     }
 
-    const cleanPin = pin.trim();
-    if (!cleanPin || cleanPin.length < 4) {
-      setLocalError('Please enter your 4-digit PIN.');
-      return;
-    }
-
+    // Sign In Mode
     setIsSubmitting(true);
     try {
-      const authResult = await loginWithUsernameAndPin(cleanIdentifier, cleanPin, rememberMe);
-      if (onAuthSuccess) {
-        await onAuthSuccess(authResult.user, authResult.token);
-      }
-    } catch (err: any) {
-      setLocalError(
-        err.message ||
-          (loginOption === 'email'
-            ? 'Incorrect email ID or PIN. Please check your credentials.'
-            : 'Incorrect username or PIN. Please check your credentials.')
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const executeRegister = async () => {
-    setLocalError(null);
-    setSuccessMessage(null);
-
-    const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    if (!cleanUsername || cleanUsername.length < 3) {
-      setLocalError('Username must be at least 3 characters long (letters, numbers, underscore, hyphen).');
-      return;
-    }
-
-    const cleanPin = pin.trim();
-    if (!cleanPin || cleanPin.length < 4) {
-      setLocalError('Please create a 4-digit PIN for your account.');
-      return;
-    }
-
-    if (cleanPin !== confirmPin.trim()) {
-      setLocalError('PINs do not match. Please verify your 4-digit PIN.');
-      return;
-    }
-
-    if (password && password.length < 6) {
-      setLocalError('Password must be at least 6 characters if provided.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const authResult = await registerWithUsernameAndPin(
-        cleanUsername,
-        cleanPin,
-        displayName.trim() || undefined,
-        password || undefined,
+      const authResult = await loginWithUsernameAndPassword(
+        cleanIdentifier,
+        password,
         rememberMe
       );
+
       if (onAuthSuccess) {
         await onAuthSuccess(authResult.user, authResult.token);
       }
     } catch (err: any) {
-      setLocalError(err.message || 'Registration failed. This username may already be taken.');
+      setLocalError(err.message || 'Incorrect username or password. Please try again.');
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleGoogleSignIn = async () => {
-    setLocalError(null);
-    setSuccessMessage(null);
-    setIsSubmitting(true);
-    try {
-      const result = await signInWithGoogle();
-      if (onAuthSuccess) {
-        await onAuthSuccess(result.user, result.token);
-      }
-    } catch (err: any) {
-      setLocalError(err.message || 'Failed to sign in with Google. Please check popup permissions.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (mode === 'signin') {
-      executeSignIn();
-    } else {
-      executeRegister();
     }
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#F4F3EF] dark:bg-[#121311] text-[#181816] dark:text-[#F4F3EF] flex flex-col justify-between p-4 sm:p-6 lg:p-8 font-sans antialiased">
-      {/* Brand Header */}
-      <header className="w-full max-w-5xl mx-auto flex items-center justify-between py-2">
-        <div className="flex items-center gap-2.5">
-          <div className="w-10 h-10 rounded-xl bg-[#181816] dark:bg-[#C5A059] text-white dark:text-[#111110] flex items-center justify-center shadow-xs">
-            <Wallet className="w-5 h-5" />
+    <div className="min-h-screen bg-[#F4F3EF] dark:bg-[#121311] text-[#181816] dark:text-[#F4F3EF] flex flex-col justify-center items-center p-4 sm:p-6 transition-colors">
+      <div className="w-full max-w-md mx-auto">
+        {/* Brand Header */}
+        <div className="text-center mb-6 sm:mb-8 space-y-2">
+          <div className="inline-flex items-center justify-center gap-2.5 px-3.5 py-1 rounded-full bg-[#EAE7DC] dark:bg-[#201F1B] border border-[#DDD8CA] dark:border-[#2C2A25] text-xs font-semibold text-[#8E7952] dark:text-[#C5A059] mb-2 tracking-wide uppercase">
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>Track · Save · Grow</span>
           </div>
-          <div>
-            <span className="text-xl font-bold tracking-tight text-[#181816] dark:text-white">
-              inflowtrack
-            </span>
-            <span className="hidden sm:inline-block ml-2 text-xs font-medium text-[#78756E] dark:text-[#9C9990] border-l border-[#DCD9D0] dark:border-[#2C2A25] pl-2">
-              Track · Save · Grow
-            </span>
-          </div>
+          <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-[#141412] dark:text-[#F6F5F0]">
+            inflowtrack
+          </h1>
+          <p className="text-xs sm:text-sm text-[#78746B] dark:text-[#9E9B92] max-w-xs mx-auto">
+            Personal income, expense, and savings tracker synchronized with your Google Sheet
+          </p>
         </div>
 
-        {/* Security Architecture Info Trigger */}
-        <button
-          type="button"
-          onClick={() => setIsArchModalOpen(true)}
-          className="text-xs font-semibold text-[#78756E] dark:text-[#C5A059] hover:text-[#181816] dark:hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer py-1.5 px-3 rounded-lg border border-[#E0DCD3] dark:border-[#2C2A26] bg-white/70 dark:bg-[#1A1A18]/70"
-        >
-          <Shield className="w-3.5 h-3.5 text-[#C5A059]" />
-          <span className="hidden sm:inline">Security Architecture</span>
-          <span className="sm:hidden">Security</span>
-        </button>
-      </header>
-
-      {/* Main Authentication Container */}
-      <main className="w-full max-w-md mx-auto my-auto py-4">
-        <div className="bg-white dark:bg-[#1A1A18] rounded-2xl border border-[#E5E2DA] dark:border-[#2C2A26] shadow-sm p-6 sm:p-8">
-          {/* Header Title & Subtitle */}
-          <div className="text-center mb-5">
-            <h1 className="text-2xl font-bold tracking-tight text-[#181816] dark:text-white flex items-center justify-center gap-2">
-              {mode === 'signin' ? (
-                <>
-                  <KeyRound className="w-5 h-5 text-[#C5A059]" />
-                  <span>Sign In</span>
-                </>
-              ) : (
-                <>
-                  <UserPlus className="w-5 h-5 text-[#C5A059]" />
-                  <span>Create Account</span>
-                </>
-              )}
-            </h1>
-            <p className="text-xs text-[#78756E] dark:text-[#9C9990] mt-1.5 leading-relaxed">
-              {mode === 'signin'
-                ? 'Sign in using your Google Account, or your username/email and 4-digit PIN.'
-                : 'Choose a unique username and 4-digit PIN to secure your account and card vault.'}
-            </p>
-          </div>
-
-          {/* Top Mode Tabs: Sign In vs Register (Always visible for direct access) */}
-          <div className="flex p-1 bg-[#F2EFE8] dark:bg-[#252420] rounded-xl border border-[#E2DDD3] dark:border-[#2E2C27] mb-5">
+        {/* Main Card */}
+        <div className="bg-white dark:bg-[#181816] border border-[#E5E0D4] dark:border-[#282622] rounded-3xl p-6 sm:p-8 shadow-xs transition-colors space-y-6">
+          {/* 1. Fast 1-Click Google Sign-In */}
+          <div>
             <button
               type="button"
-              id="tab-auth-signin"
-              onClick={() => handleModeChange('signin')}
-              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                mode === 'signin'
-                  ? 'bg-white dark:bg-[#181816] text-[#181816] dark:text-white shadow-xs'
-                  : 'text-[#78756E] dark:text-[#9C9990] hover:text-[#181816] dark:hover:text-white'
-              }`}
-            >
-              <LogIn className="w-3.5 h-3.5 text-[#C5A059]" />
-              <span>Sign In</span>
-            </button>
-            <button
-              type="button"
-              id="tab-auth-register"
-              onClick={() => handleModeChange('register')}
-              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                mode === 'register'
-                  ? 'bg-white dark:bg-[#181816] text-[#181816] dark:text-white shadow-xs'
-                  : 'text-[#78756E] dark:text-[#9C9990] hover:text-[#181816] dark:hover:text-white'
-              }`}
-            >
-              <UserPlus className="w-3.5 h-3.5 text-[#C5A059]" />
-              <span>Register Account</span>
-            </button>
-          </div>
-
-          {/* Sign in with Google (Prominent 1-click option with official branding) */}
-          <div className="mb-5">
-            <button
-              type="button"
-              id="btn-auth-google"
-              disabled={isBusy}
+              id="btn-auth-google-signin"
               onClick={handleGoogleSignIn}
-              className="w-full min-h-[46px] py-2.5 px-4 bg-white hover:bg-[#F8F7F4] dark:bg-[#22211E] dark:hover:bg-[#2A2925] border border-[#D5D0C5] dark:border-[#383630] rounded-xl text-xs font-semibold text-[#181816] dark:text-[#F4F3EF] flex items-center justify-center gap-3 shadow-2xs hover:shadow-xs transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              disabled={isBusy}
+              className="w-full min-h-[48px] px-4 py-3 bg-[#FAF8F5] dark:bg-[#201F1B] hover:bg-[#F2EFE8] dark:hover:bg-[#282622] border border-[#D5D0C5] dark:border-[#383630] rounded-2xl flex items-center justify-center gap-3 text-sm font-semibold text-[#181816] dark:text-[#F4F3EF] transition-all cursor-pointer shadow-2xs hover:shadow-xs disabled:opacity-60"
             >
-              {isBusy ? (
+              {isGoogleConnecting ? (
                 <Loader2 className="w-4 h-4 animate-spin text-[#C5A059]" />
               ) : (
                 <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
@@ -399,554 +228,260 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               )}
               <span>Continue with Google</span>
             </button>
-
-            <div className="relative my-4 flex items-center justify-center">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-[#E5E2DA] dark:border-[#2C2A26]" />
-              </div>
-              <span className="relative bg-white dark:bg-[#1A1A18] px-2.5 text-[10.5px] uppercase tracking-wider font-medium text-[#78756E] dark:text-[#9C9990]">
-                or continue with credentials
-              </span>
-            </div>
+            <p className="text-[11px] text-center text-[#78746B] dark:text-[#9E9B92] mt-1.5">
+              1-tap sign-in with automatic Google Sheets bidirectional sync
+            </p>
           </div>
 
-          {/* Error Banner */}
+          {/* Divider */}
+          <div className="relative flex items-center justify-center">
+            <div className="border-t border-[#E5E0D4] dark:border-[#282622] w-full" />
+            <span className="bg-white dark:bg-[#181816] px-3 text-[11px] font-medium text-[#8E7952] dark:text-[#C5A059] uppercase tracking-wider shrink-0">
+              or continue with account
+            </span>
+            <div className="border-t border-[#E5E0D4] dark:border-[#282622] w-full" />
+          </div>
+
+          {/* Mode Switcher Tabs */}
+          <div className="grid grid-cols-2 p-1 bg-[#F4F3EF] dark:bg-[#201F1B] rounded-2xl border border-[#E5E0D4] dark:border-[#2C2A25]">
+            <button
+              type="button"
+              id="tab-auth-signin"
+              onClick={() => handleModeChange('signin')}
+              className={`py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
+                mode === 'signin'
+                  ? 'bg-white dark:bg-[#141412] text-[#141412] dark:text-[#F6F5F0] shadow-2xs font-bold'
+                  : 'text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-[#F6F5F0]'
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              id="tab-auth-register"
+              onClick={() => handleModeChange('register')}
+              className={`py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
+                mode === 'register'
+                  ? 'bg-white dark:bg-[#141412] text-[#141412] dark:text-[#F6F5F0] shadow-2xs font-bold'
+                  : 'text-[#78746B] dark:text-[#9E9B92] hover:text-[#141412] dark:hover:text-[#F6F5F0]'
+              }`}
+            >
+              Create Account
+            </button>
+          </div>
+
+          {/* Status Notifications */}
           {activeError && (
             <div
               id="auth-error-banner"
-              className="mb-5 p-3.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-xl text-xs font-medium text-rose-700 dark:text-rose-300 flex items-start gap-2.5"
+              className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl text-xs text-rose-800 dark:text-rose-300 flex items-start gap-2.5 font-medium animate-fadeIn"
             >
               <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <span>{activeError}</span>
-              </div>
+              <span>{activeError}</span>
             </div>
           )}
 
-          {/* Success Banner */}
           {successMessage && (
             <div
               id="auth-success-banner"
-              className="mb-5 p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-xl text-xs font-medium text-emerald-700 dark:text-emerald-300 flex items-start gap-2.5"
+              className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-2.5 font-medium animate-fadeIn"
             >
               <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
               <span>{successMessage}</span>
             </div>
           )}
 
-          {/* Form */}
-          <form onSubmit={handleFormSubmit} className="space-y-4">
-            {/* Login Option: Username or Email ID Option Selector */}
-            {mode === 'signin' && (
-              <div className="flex p-1 bg-[#F2EFE8] dark:bg-[#252420] rounded-xl border border-[#E2DDD3] dark:border-[#2E2C27]">
-                <button
-                  type="button"
-                  id="btn-login-option-username"
-                  onClick={() => {
-                    setLoginOption('username');
-                    setLocalError(null);
-                  }}
-                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    loginOption === 'username'
-                      ? 'bg-white dark:bg-[#181816] text-[#181816] dark:text-white shadow-xs'
-                      : 'text-[#78756E] dark:text-[#9C9990] hover:text-[#181816] dark:hover:text-white'
-                  }`}
-                >
-                  <User className="w-3.5 h-3.5" />
-                  <span>Username</span>
-                </button>
-                <button
-                  type="button"
-                  id="btn-login-option-email"
-                  onClick={() => {
-                    setLoginOption('email');
-                    setLocalError(null);
-                  }}
-                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    loginOption === 'email'
-                      ? 'bg-white dark:bg-[#181816] text-[#181816] dark:text-white shadow-xs'
-                      : 'text-[#78756E] dark:text-[#9C9990] hover:text-[#181816] dark:hover:text-white'
-                  }`}
-                >
-                  <Mail className="w-3.5 h-3.5" />
-                  <span>Email ID</span>
-                </button>
-              </div>
-            )}
-
-            {/* Username or Email ID Input Field */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label
-                  htmlFor="auth-username"
-                  className="block text-xs font-semibold text-[#5E5B52] dark:text-[#A39F95]"
-                >
-                  {mode === 'signin'
-                    ? loginOption === 'email'
-                      ? 'Email ID'
-                      : 'Username'
-                    : 'Unique Username'}
-                </label>
-                {mode === 'register' && (
-                  <span className="text-[10px] text-[#78756E] dark:text-[#9C9990]">
-                    Letters, numbers, _, -
-                  </span>
-                )}
-              </div>
+          {/* Sign In & Register Form */}
+          <form onSubmit={handleUsernamePasswordSubmit} className="space-y-4">
+            {/* Username or Email Input */}
+            <div className="space-y-1.5">
+              <label
+                htmlFor="auth-username"
+                className="block text-xs font-semibold text-[#141412] dark:text-[#F6F5F0]"
+              >
+                {mode === 'signin' ? 'Username or Email' : 'Choose a Username'}
+              </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#78756E] dark:text-[#9C9990]">
-                  {mode === 'signin' && (loginOption === 'email' || username.includes('@')) ? (
-                    <Mail className="w-4 h-4 text-[#C5A059]" />
-                  ) : (
-                    <User className="w-4 h-4" />
-                  )}
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#8E7952] dark:text-[#C5A059]">
+                  <User className="w-4 h-4" />
                 </div>
                 <input
                   id="auth-username"
-                  type={mode === 'signin' && (loginOption === 'email' || username.includes('@')) ? 'email' : 'text'}
-                  required
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  autoComplete={mode === 'signin' ? (loginOption === 'email' ? 'email' : 'username') : 'username'}
-                  value={username}
+                  name="username"
+                  type="text"
+                  autoComplete="username"
+                  value={usernameOrEmail}
                   onChange={(e) => {
-                    const val = e.target.value;
-                    if (mode === 'signin') {
-                      const cleaned = val.toLowerCase().replace(/[^a-z0-9_@.\+-]/g, '');
-                      setUsername(cleaned);
-                      if (cleaned.includes('@') && loginOption !== 'email') {
-                        setLoginOption('email');
-                      }
-                    } else {
-                      setUsername(val.toLowerCase().replace(/[^a-z0-9_-]/g, ''));
-                    }
+                    setUsernameOrEmail(e.target.value);
                     setLocalError(null);
                   }}
-                  placeholder=""
-                  className="w-full pl-9 pr-3.5 py-2.5 text-sm bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E0DCD3] dark:border-[#2F2E29] rounded-xl focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:ring-2 focus:ring-[#C5A059] text-[#181816] dark:text-white transition-all font-mono"
+                  disabled={isBusy}
+                  placeholder={mode === 'signin' ? 'e.g. shivam or shivam@example.com' : 'e.g. shivam_tech'}
+                  className="w-full min-h-[46px] pl-10 pr-3.5 py-2 text-sm bg-[#FAF8F5] dark:bg-[#1E1D19] border border-[#DDD8CA] dark:border-[#33312B] rounded-xl text-[#141412] dark:text-[#F6F5F0] placeholder-[#A09C92] dark:placeholder-[#6E6A60] focus:outline-none focus:ring-2 focus:ring-[#C5A059]/40 focus:border-[#C5A059] transition-all"
                 />
               </div>
             </div>
 
-            {/* Registration: Optional Full Name */}
+            {/* Display Name Input (Register Only) */}
             {mode === 'register' && (
-              <div>
+              <div className="space-y-1.5 animate-fadeIn">
                 <label
                   htmlFor="auth-display-name"
-                  className="block text-xs font-medium text-[#5E5B52] dark:text-[#A39F95] mb-1.5"
+                  className="block text-xs font-semibold text-[#141412] dark:text-[#F6F5F0]"
                 >
-                  Full Name <span className="text-[#8A8880] font-normal">(optional)</span>
+                  Full Name <span className="text-[#8E7952] font-normal">(Optional)</span>
                 </label>
                 <input
                   id="auth-display-name"
+                  name="displayName"
                   type="text"
-                  autoComplete="name"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder=""
-                  className="w-full px-3.5 py-2.5 text-sm bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E0DCD3] dark:border-[#2F2E29] rounded-xl focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:ring-2 focus:ring-[#C5A059] text-[#181816] dark:text-white transition-all"
+                  disabled={isBusy}
+                  placeholder="e.g. Shiva Matangi"
+                  className="w-full min-h-[46px] px-3.5 py-2 text-sm bg-[#FAF8F5] dark:bg-[#1E1D19] border border-[#DDD8CA] dark:border-[#33312B] rounded-xl text-[#141412] dark:text-[#F6F5F0] placeholder-[#A09C92] dark:placeholder-[#6E6A60] focus:outline-none focus:ring-2 focus:ring-[#C5A059]/40 focus:border-[#C5A059] transition-all"
                 />
               </div>
             )}
 
-            {/* PIN Input Field (Primary authentication mechanism for both Sign In and Registration) */}
-            {(mode === 'register' || !usePasswordInstead) && (
-              <div className="space-y-3.5">
-                {/* Registration Info Note */}
-                {mode === 'register' && (
-                  <div className="p-2.5 rounded-xl bg-[#C5A059]/10 border border-[#C5A059]/25 flex items-center gap-2 text-xs text-[#8E7952] dark:text-[#C5A059]">
-                    <ShieldCheck className="w-4 h-4 shrink-0" />
-                    <span>Create a 4-digit PIN to secure your account and unlock your card vault.</span>
-                  </div>
-                )}
-
-                {/* Main 4-Digit PIN */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label
-                      htmlFor="auth-pin"
-                      className="block text-xs font-semibold text-[#5E5B52] dark:text-[#A39F95]"
-                    >
-                      {mode === 'register' ? 'Create 4-Digit Security PIN *' : '4-Digit PIN'}
-                    </label>
-                    {mode === 'signin' && (
-                      <button
-                        type="button"
-                        onClick={() => setUsePasswordInstead(true)}
-                        className="text-xs font-medium text-[#78756E] dark:text-[#C5A059] hover:underline cursor-pointer"
-                      >
-                        Use password instead
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="relative">
-                    <input
-                      id="auth-pin"
-                      type={showPin ? 'text' : 'password'}
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      maxLength={4}
-                      required
-                      value={pin}
-                      onChange={(e) => {
-                        setPin(e.target.value.replace(/\D/g, '').slice(0, 4));
-                        setLocalError(null);
-                      }}
-                      placeholder="••••"
-                      className="w-full pl-3.5 pr-10 py-2.5 text-lg tracking-[0.3em] font-mono text-center bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E0DCD3] dark:border-[#2F2E29] rounded-xl focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:ring-2 focus:ring-[#C5A059] text-[#181816] dark:text-white placeholder:text-[#9E9B92] transition-all"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPin(!showPin)}
-                      aria-label={showPin ? 'Hide PIN' : 'Show PIN'}
-                      className="absolute right-3 top-2.5 p-1 text-[#8A8880] hover:text-[#181816] dark:hover:text-white transition-colors cursor-pointer"
-                    >
-                      {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
+            {/* Password Input */}
+            <div className="space-y-1.5">
+              <label
+                htmlFor="auth-password"
+                className="block text-xs font-semibold text-[#141412] dark:text-[#F6F5F0]"
+              >
+                Password
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#8E7952] dark:text-[#C5A059]">
+                  <Lock className="w-4 h-4" />
                 </div>
-
-                {/* Registration: Confirm 4-Digit PIN */}
-                {mode === 'register' && (
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label
-                        htmlFor="auth-confirm-pin"
-                        className="block text-xs font-semibold text-[#5E5B52] dark:text-[#A39F95]"
-                      >
-                        Confirm 4-Digit Security PIN *
-                      </label>
-                      {pin.length === 4 && confirmPin.length === 4 && (
-                        <span
-                          className={`text-[11px] font-semibold flex items-center gap-1 ${
-                            pin === confirmPin
-                              ? 'text-emerald-600 dark:text-emerald-400'
-                              : 'text-rose-600 dark:text-rose-400'
-                          }`}
-                        >
-                          {pin === confirmPin ? (
-                            <>
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>PINs match</span>
-                            </>
-                          ) : (
-                            <>
-                              <AlertCircle className="w-3.5 h-3.5" />
-                              <span>PINs don't match</span>
-                            </>
-                          )}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="relative">
-                      <input
-                        id="auth-confirm-pin"
-                        type={showPin ? 'text' : 'password'}
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        maxLength={4}
-                        required
-                        value={confirmPin}
-                        onChange={(e) => {
-                          setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4));
-                          setLocalError(null);
-                        }}
-                        placeholder="••••"
-                        className="w-full px-3.5 py-2.5 text-lg tracking-[0.3em] font-mono text-center bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E0DCD3] dark:border-[#2F2E29] rounded-xl focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:ring-2 focus:ring-[#C5A059] text-[#181816] dark:text-white placeholder:text-[#9E9B92] transition-all"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Numeric PIN Keypad Helper (Shown for both modes) */}
-                <div className="pt-1">
-                  <div className="grid grid-cols-3 gap-1.5 max-w-[220px] mx-auto">
-                    {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
-                      <button
-                        key={digit}
-                        type="button"
-                        onClick={() => handlePinDigitClick(digit)}
-                        className="py-1.5 bg-[#F2EFE8] dark:bg-[#242320] hover:bg-[#E6E2D8] dark:hover:bg-[#2E2C28] text-sm font-semibold rounded-lg text-[#181816] dark:text-white transition-colors cursor-pointer select-none active:scale-95"
-                      >
-                        {digit}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPin('');
-                        setConfirmPin('');
-                      }}
-                      className="py-1.5 text-[11px] font-semibold text-[#8A8880] hover:text-[#181816] dark:hover:text-white transition-colors cursor-pointer"
-                    >
-                      Clear
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handlePinDigitClick('0')}
-                      className="py-1.5 bg-[#F2EFE8] dark:bg-[#242320] hover:bg-[#E6E2D8] dark:hover:bg-[#2E2C28] text-sm font-semibold rounded-lg text-[#181816] dark:text-white transition-colors cursor-pointer select-none active:scale-95"
-                    >
-                      0
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handlePinBackspace}
-                      className="py-1.5 text-[11px] font-semibold text-[#8A8880] hover:text-rose-600 transition-colors cursor-pointer flex items-center justify-center"
-                      title="Backspace"
-                    >
-                      ⌫
-                    </button>
-                  </div>
-                </div>
+                <input
+                  id="auth-password"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setLocalError(null);
+                  }}
+                  disabled={isBusy}
+                  placeholder="••••••••"
+                  className="w-full min-h-[46px] pl-10 pr-10 py-2 text-sm bg-[#FAF8F5] dark:bg-[#1E1D19] border border-[#DDD8CA] dark:border-[#33312B] rounded-xl text-[#141412] dark:text-[#F6F5F0] placeholder-[#A09C92] dark:placeholder-[#6E6A60] focus:outline-none focus:ring-2 focus:ring-[#C5A059]/40 focus:border-[#C5A059] transition-all"
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-[#8E7952] dark:text-[#C5A059] hover:text-[#141412] dark:hover:text-[#F6F5F0] transition-colors cursor-pointer"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
-            )}
+            </div>
 
-            {/* Password Field (If toggled or optional for register) */}
-            {(usePasswordInstead || mode === 'register') && (
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label
-                    htmlFor="auth-password"
-                    className="block text-xs font-semibold text-[#5E5B52] dark:text-[#A39F95]"
-                  >
-                    {mode === 'register' ? (
-                      <>
-                        Account Password{' '}
-                        <span className="text-[#8A8880] font-normal">(optional recovery key)</span>
-                      </>
-                    ) : (
-                      'Account Password'
-                    )}
-                  </label>
-                  {usePasswordInstead && mode === 'signin' && (
-                    <button
-                      type="button"
-                      onClick={() => setUsePasswordInstead(false)}
-                      className="text-xs font-medium text-[#78756E] dark:text-[#C5A059] hover:underline cursor-pointer"
-                    >
-                      Use PIN instead
-                    </button>
-                  )}
-                </div>
+            {/* Confirm Password (Register Only) */}
+            {mode === 'register' && (
+              <div className="space-y-1.5 animate-fadeIn">
+                <label
+                  htmlFor="auth-confirm-password"
+                  className="block text-xs font-semibold text-[#141412] dark:text-[#F6F5F0]"
+                >
+                  Confirm Password
+                </label>
                 <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#8E7952] dark:text-[#C5A059]">
+                    <Lock className="w-4 h-4" />
+                  </div>
                   <input
-                    id="auth-password"
+                    id="auth-confirm-password"
+                    name="confirmPassword"
                     type={showPassword ? 'text' : 'password'}
-                    required={usePasswordInstead}
-                    value={password}
+                    autoComplete="new-password"
+                    value={confirmPassword}
                     onChange={(e) => {
-                      setPassword(e.target.value);
+                      setConfirmPassword(e.target.value);
                       setLocalError(null);
                     }}
-                    placeholder=""
-                    className="w-full pl-3.5 pr-10 py-2.5 text-sm bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E0DCD3] dark:border-[#2F2E29] rounded-xl focus:bg-white dark:focus:bg-[#181816] focus:outline-none focus:ring-2 focus:ring-[#C5A059] text-[#181816] dark:text-white transition-all"
+                    disabled={isBusy}
+                    placeholder="••••••••"
+                    className="w-full min-h-[46px] pl-10 pr-3.5 py-2 text-sm bg-[#FAF8F5] dark:bg-[#1E1D19] border border-[#DDD8CA] dark:border-[#33312B] rounded-xl text-[#141412] dark:text-[#F6F5F0] placeholder-[#A09C92] dark:placeholder-[#6E6A60] focus:outline-none focus:ring-2 focus:ring-[#C5A059]/40 focus:border-[#C5A059] transition-all"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    className="absolute right-3 top-2.5 p-0.5 text-[#8A8880] hover:text-[#181816] dark:hover:text-white transition-colors cursor-pointer"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
                 </div>
               </div>
             )}
 
-            {/* Remember session checkbox */}
-            <div className="flex items-center pt-0.5">
-              <label className="flex items-center gap-2 text-xs text-[#5E5B52] dark:text-[#A39F95] font-medium cursor-pointer select-none">
+            {/* Remember Me Checkbox */}
+            <div className="flex items-center justify-between pt-1">
+              <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-[#78746B] dark:text-[#9E9B92]">
                 <input
                   type="checkbox"
-                  id="auth-remember-session"
                   checked={rememberMe}
                   onChange={(e) => setRememberMe(e.target.checked)}
-                  className="w-4 h-4 rounded border-[#C7C3B8] text-[#181816] focus:ring-[#C5A059] cursor-pointer"
+                  className="w-4 h-4 rounded text-[#C5A059] border-[#DDD8CA] dark:border-[#33312B] focus:ring-[#C5A059]/40 cursor-pointer"
                 />
-                <span>Remember my login on this device</span>
+                <span>Remember me on this device</span>
               </label>
             </div>
 
-            {/* ------------------------------------------------------------- */}
-            {/* MANDATORY REQUIREMENT: Sign In and Register Buttons at Bottom */}
-            {/* Kept Side by Side, with simple and easy flow                  */}
-            {/* ------------------------------------------------------------- */}
-            <div className="pt-2">
-              <div className="grid grid-cols-2 gap-3">
-                {/* Sign In Button */}
-                <button
-                  type={mode === 'signin' ? 'submit' : 'button'}
-                  id="btn-auth-signin"
-                  disabled={isBusy}
-                  onClick={mode === 'signin' ? undefined : () => handleModeChange('signin')}
-                  className={`min-h-[46px] w-full flex items-center justify-center gap-2 py-2.5 px-4 font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
-                    mode === 'signin'
-                      ? 'bg-[#181816] hover:bg-[#2C2A25] dark:bg-[#C5A059] dark:hover:bg-[#D4B066] text-white dark:text-[#111110] ring-1 ring-black/10'
-                      : 'bg-[#F2EFE8] hover:bg-[#E6E2D8] dark:bg-[#262522] dark:hover:bg-[#302F2B] text-[#5E5B52] dark:text-[#A39F95] border border-[#E0DCD3] dark:border-[#33312B]'
-                  }`}
-                >
-                  {isBusy && mode === 'signin' ? (
-                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                  ) : (
-                    <LogIn className="w-4 h-4 shrink-0" />
-                  )}
-                  <span>Sign In</span>
-                </button>
-
-                {/* Register Button */}
-                <button
-                  type={mode === 'register' ? 'submit' : 'button'}
-                  id="btn-auth-register"
-                  disabled={isBusy}
-                  onClick={mode === 'register' ? undefined : () => handleModeChange('register')}
-                  className={`min-h-[46px] w-full flex items-center justify-center gap-2 py-2.5 px-4 font-semibold text-xs rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
-                    mode === 'register'
-                      ? 'bg-[#181816] hover:bg-[#2C2A25] dark:bg-[#C5A059] dark:hover:bg-[#D4B066] text-white dark:text-[#111110] ring-1 ring-black/10'
-                      : 'bg-[#F2EFE8] hover:bg-[#E6E2D8] dark:bg-[#262522] dark:hover:bg-[#302F2B] text-[#5E5B52] dark:text-[#A39F95] border border-[#E0DCD3] dark:border-[#33312B]'
-                  }`}
-                >
-                  {isBusy && mode === 'register' ? (
-                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                  ) : (
-                    <UserPlus className="w-4 h-4 shrink-0" />
-                  )}
-                  <span>Register</span>
-                </button>
-              </div>
-
-              <p className="text-[10px] text-center text-[#78756E] dark:text-[#9C9990] mt-3">
-                {mode === 'signin'
-                  ? 'New to inflowtrack? Tap Register to choose your username.'
-                  : 'Already registered? Tap Sign In to unlock with your PIN.'}
-              </p>
-            </div>
+            {/* Submit Button */}
+            <button
+              type="submit"
+              id="btn-auth-submit"
+              disabled={isBusy}
+              className="w-full min-h-[48px] px-4 py-3 bg-[#181816] hover:bg-[#2A2925] dark:bg-[#F6F5F0] dark:hover:bg-[#EAE7DC] text-white dark:text-[#181816] font-semibold text-sm rounded-2xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs hover:shadow-sm disabled:opacity-60 mt-2"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-[#C5A059]" />
+                  <span>{mode === 'signin' ? 'Signing In...' : 'Creating Account...'}</span>
+                </>
+              ) : (
+                <>
+                  <span>{mode === 'signin' ? 'Sign In to Workspace' : 'Create Account & Start Tracking'}</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
           </form>
 
-          {/* Security Architecture Notice (Explicit verification guarantee) */}
-          <div className="mt-5 pt-4 border-t border-[#E5E2DA] dark:border-[#2C2A26] flex items-center justify-between text-[10px] text-[#78756E] dark:text-[#9C9990]">
-            <div className="flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-[#C5A059] shrink-0" />
-              <span>PBKDF2-SHA256 salted encryption</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsArchModalOpen(true)}
-              className="text-[#181816] dark:text-[#C5A059] font-medium hover:underline cursor-pointer"
-            >
-              Storage details →
-            </button>
-          </div>
-        </div>
-
-        {/* Feature Badges below Card */}
-        <div className="mt-6 grid grid-cols-3 gap-2.5 text-center">
-          <div className="p-2.5 rounded-xl bg-white/60 dark:bg-[#1A1A18]/60 border border-[#E5E2DA]/80 dark:border-[#2C2A26]/80 flex flex-col items-center">
-            <User className="w-4 h-4 text-[#C5A059] mb-1" />
-            <span className="text-[11px] font-semibold text-[#181816] dark:text-white">
-              Username or Email
-            </span>
-            <span className="text-[9.5px] text-[#78756E] dark:text-[#9C9990] mt-0.5">
-              Flexible Login
-            </span>
-          </div>
-
-          <div className="p-2.5 rounded-xl bg-white/60 dark:bg-[#1A1A18]/60 border border-[#E5E2DA]/80 dark:border-[#2C2A26]/80 flex flex-col items-center">
-            <KeyRound className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mb-1" />
-            <span className="text-[11px] font-semibold text-[#181816] dark:text-white">
-              Quick PIN Login
-            </span>
-            <span className="text-[9.5px] text-[#78756E] dark:text-[#9C9990] mt-0.5">
-              Instant access
-            </span>
-          </div>
-
-          <div className="p-2.5 rounded-xl bg-white/60 dark:bg-[#1A1A18]/60 border border-[#E5E2DA]/80 dark:border-[#2C2A26]/80 flex flex-col items-center">
-            <CreditCard className="w-4 h-4 text-blue-600 dark:text-blue-400 mb-1" />
-            <span className="text-[11px] font-semibold text-[#181816] dark:text-white">
-              Card & UPI Vault
-            </span>
-            <span className="text-[9.5px] text-[#78756E] dark:text-[#9C9990] mt-0.5">
-              Protected by PIN
+          {/* Automatic Sync Guarantee Info */}
+          <div className="pt-2 border-t border-[#E5E0D4] dark:border-[#282622] flex items-center gap-2 text-[11px] text-[#78746B] dark:text-[#9E9B92]">
+            <ShieldCheck className="w-3.5 h-3.5 text-[#C5A059] shrink-0" />
+            <span>
+              Google Sheets/API access is automatically initialized. No manual configuration needed.
             </span>
           </div>
         </div>
-      </main>
 
-      {/* Security Architecture & Storage Modal */}
-      {isArchModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white dark:bg-[#1A1A18] rounded-2xl border border-[#E5E2DA] dark:border-[#2C2A26] shadow-xl p-5 sm:p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-[#E5E2DA] dark:border-[#2C2A26] mb-4">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-[#C5A059]" />
-                <h3 className="text-base font-bold text-[#181816] dark:text-white">
-                  Security Architecture & Storage
-                </h3>
-              </div>
+        {/* Bottom Switcher Link */}
+        <div className="text-center mt-5 text-xs text-[#78746B] dark:text-[#9E9B92]">
+          {mode === 'signin' ? (
+            <span>
+              Don't have an account yet?{' '}
               <button
                 type="button"
-                onClick={() => setIsArchModalOpen(false)}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-[#78756E] hover:text-[#181816] dark:hover:text-white hover:bg-[#F2EFE8] dark:hover:bg-[#252522] cursor-pointer"
+                onClick={() => handleModeChange('register')}
+                className="font-semibold text-[#181816] dark:text-[#F6F5F0] underline hover:text-[#C5A059] transition-colors cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                Create one now
               </button>
-            </div>
-
-            <div className="space-y-3.5 text-xs text-[#5E5B52] dark:text-[#A39F95] leading-relaxed">
-              <div className="p-3 rounded-xl bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E5E2DA] dark:border-[#2C2A26]">
-                <h4 className="font-semibold text-[#181816] dark:text-white flex items-center gap-1.5 mb-1">
-                  <User className="w-3.5 h-3.5 text-[#C5A059]" />
-                  <span>Unique Username Storage</span>
-                </h4>
-                <p>
-                  Usernames are stored in the server database (<code>.data/auth_users.json</code> and{' '}
-                  <code>WorkbookStore.userSecurity[uid].username</code>). Each username is normalized,
-                  indexed, and guaranteed unique across all accounts.
-                </p>
-              </div>
-
-              <div className="p-3 rounded-xl bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E5E2DA] dark:border-[#2C2A26]">
-                <h4 className="font-semibold text-[#181816] dark:text-white flex items-center gap-1.5 mb-1">
-                  <Lock className="w-3.5 h-3.5 text-[#C5A059]" />
-                  <span>No Plaintext PINs or Passwords</span>
-                </h4>
-                <p>
-                  Passwords and PINs are <strong>never stored as readable or plain-text values</strong> in Firebase or the database. All credentials undergo PBKDF2-HMAC-SHA256 hashing with 100,000 iterations and a unique 16-byte random salt per user.
-                </p>
-              </div>
-
-              <div className="p-3 rounded-xl bg-[#F9F8F5] dark:bg-[#22211E] border border-[#E5E2DA] dark:border-[#2C2A26]">
-                <h4 className="font-semibold text-[#181816] dark:text-white flex items-center gap-1.5 mb-1">
-                  <CreditCard className="w-3.5 h-3.5 text-[#C5A059]" />
-                  <span>Card, UPI ID & QR Code Storage</span>
-                </h4>
-                <p>
-                  Card numbers, UPI IDs, and QR code configurations are saved securely in the database (<code>WorkbookStore.userCards[uid]</code>) isolated strictly by verified Firebase UID. All card-management actions (editing details, updating UPI ID, modifying QR code, deleting cards) are protected behind mandatory PIN authentication.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-5 pt-3 border-t border-[#E5E2DA] dark:border-[#2C2A26] flex justify-end">
+            </span>
+          ) : (
+            <span>
+              Already have an account?{' '}
               <button
                 type="button"
-                onClick={() => setIsArchModalOpen(false)}
-                className="px-4 py-2 text-xs font-semibold rounded-xl bg-[#181816] dark:bg-[#C5A059] text-white dark:text-[#111110] hover:bg-[#2C2A25] dark:hover:bg-[#D4B066] cursor-pointer"
+                onClick={() => handleModeChange('signin')}
+                className="font-semibold text-[#181816] dark:text-[#F6F5F0] underline hover:text-[#C5A059] transition-colors cursor-pointer"
               >
-                Close
+                Sign in here
               </button>
-            </div>
-          </div>
+            </span>
+          )}
         </div>
-      )}
-
-      {/* Clean Footer */}
-      <footer className="w-full max-w-5xl mx-auto text-center py-3 border-t border-[#E5E2DA] dark:border-[#2C2A26]/60">
-        <p className="text-[11px] text-[#78756E] dark:text-[#9C9990]">
-          inflowtrack — Money In Out Tracker · Track, Save, and Grow
-        </p>
-      </footer>
+      </div>
     </div>
   );
 };

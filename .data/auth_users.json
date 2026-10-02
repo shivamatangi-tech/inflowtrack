@@ -1,0 +1,20 @@
+{
+  "ff_uid_45a9754b84f9e3e69796c063": {
+    "uid": "ff_uid_45a9754b84f9e3e69796c063",
+    "email": "test01@inflowtrack.app",
+    "username": "test01",
+    "displayName": "Shiva",
+    "passwordHash": "pbkdf2_sha256$100000$c75c2fd9d6c02a9cfa86f5a8b6613fbb$a62193c0bae017449afa0cce5c63bbeb41ace5df46462d66d1b17c6c25168e06",
+    "createdAt": "2026-10-02T17:09:21.670Z",
+    "updatedAt": "2026-10-02T17:09:21.670Z"
+  },
+  "ff_google_905d7395496c3bbe": {
+    "uid": "ff_google_905d7395496c3bbe",
+    "email": "test@gmail.com",
+    "username": "test",
+    "displayName": "Shiva Matangi",
+    "passwordHash": "pbkdf2_sha256$100000$90e20b5bad0c1853bc68955672ecf7c9$8cd11826c5484ea378f2704012937c74a90286dd28c24c3f6bcd78c0978f1596",
+    "createdAt": "2026-10-02T17:26:03.112Z",
+    "updatedAt": "2026-10-02T17:26:03.112Z"
+  }
+}

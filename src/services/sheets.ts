@@ -128,24 +128,28 @@ export const DEFAULT_ACCOUNTS = [
   'UPI Wallet',
 ];
 
-const SHORT_MONTH_NAMES_TITLE = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const LOWER_MONTH_ABBRS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sept', 'oct', 'nov', 'dec'];
 
 export function getMonthSheetName(rawDate?: string): string {
-  if (!rawDate) {
-    const now = new Date();
-    return `${SHORT_MONTH_NAMES_TITLE[now.getMonth()]}-${now.getFullYear()}`;
-  }
-  const normalized = normalizeDateString(rawDate);
-  const parts = normalized.split('-');
-  if (parts.length === 3) {
-    const year = parts[0];
-    const monthIndex = parseInt(parts[1], 10) - 1;
-    if (monthIndex >= 0 && monthIndex < 12) {
-      return `${SHORT_MONTH_NAMES_TITLE[monthIndex]}-${year}`;
+  let year = new Date().getFullYear();
+  let monthIndex = new Date().getMonth();
+
+  if (rawDate) {
+    const normalized = normalizeDateString(rawDate);
+    const parts = normalized.split('-');
+    if (parts.length === 3) {
+      year = parseInt(parts[0], 10);
+      monthIndex = parseInt(parts[1], 10) - 1;
     }
   }
-  const now = new Date();
-  return `${SHORT_MONTH_NAMES_TITLE[now.getMonth()]}-${now.getFullYear()}`;
+
+  if (monthIndex < 0 || monthIndex > 11 || isNaN(monthIndex) || isNaN(year)) {
+    const now = new Date();
+    year = now.getFullYear();
+    monthIndex = now.getMonth();
+  }
+
+  return `${LOWER_MONTH_ABBRS[monthIndex]}-${year}`;
 }
 
 export function extractFolderIdFromUrlOrId(rawInput: string): string {

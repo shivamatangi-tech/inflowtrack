@@ -36,7 +36,6 @@ import {
   formatINR,
   formatDateToDDMMYYYY,
 } from '../utils/formatters';
-import { getMonthSheetName } from '../services/sheets';
 import { ConfirmationDialog } from './ConfirmationDialog';
 import { EditTransactionModal } from './EditTransactionModal';
 import { RecurringModal } from './RecurringModal';
@@ -375,11 +374,6 @@ export const RecentActivity: React.FC<RecentActivityProps> = ({
           <span className="text-xs font-medium text-[#8C8980] dark:text-[#78756E] tabular-nums">
             {scopedTransactions.length} {scopedTransactions.length === 1 ? 'item' : 'items'}
           </span>
-          {selectedMonth && (
-            <span className="inline-flex items-center gap-1 font-mono text-[11px] px-2 py-0.5 rounded-md bg-[#F4F3EF] dark:bg-[#22221F] text-[#78756E] dark:text-[#9C9990] border border-[#E2DFD9] dark:border-[#2C2A26]">
-              Sheet Tab: {getMonthSheetName(selectedMonth)}
-            </span>
-          )}
         </div>
 
         {/* Quick Action Tools: Responsive stack/grid on small mobile, row on tablet/desktop */}

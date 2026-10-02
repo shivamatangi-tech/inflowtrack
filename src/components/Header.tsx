@@ -107,6 +107,18 @@ export const Header: React.FC<HeaderProps> = ({
             >
               Cards & Goals
             </button>
+            <button
+              type="button"
+              id="desktop-tab-calculator"
+              onClick={() => onTabChange('calculator')}
+              className={`min-h-[44px] py-1.5 border-b-2 transition-all cursor-pointer whitespace-nowrap flex items-center ${
+                activeDesktopTab === 'calculator'
+                  ? 'border-[#C5A059] text-[#141412] dark:text-[#F6F5F0] font-semibold'
+                  : 'border-transparent hover:text-[#141412] dark:hover:text-[#F6F5F0] hover:border-[#C5A059]/40'
+              }`}
+            >
+              Calculator
+            </button>
             {onOpenRecordEntry && (
               <button
                 type="button"
@@ -234,6 +246,16 @@ export const Header: React.FC<HeaderProps> = ({
               className="w-full min-h-[44px] px-3.5 rounded-xl flex items-center justify-between text-xs font-medium text-[#141412] dark:text-[#F6F5F0] hover:bg-white dark:hover:bg-[#1E1E1B] transition-colors cursor-pointer"
             >
               <span>Cards & Goals</span>
+              <ArrowUpRight className="w-4 h-4 text-[#C5A059]" />
+            </button>
+          )}
+          {onTabChange && (
+            <button
+              type="button"
+              onClick={() => handleNavClick(() => onTabChange('calculator'))}
+              className="w-full min-h-[44px] px-3.5 rounded-xl flex items-center justify-between text-xs font-medium text-[#141412] dark:text-[#F6F5F0] hover:bg-white dark:hover:bg-[#1E1E1B] transition-colors cursor-pointer"
+            >
+              <span>Finance Calculator</span>
               <ArrowUpRight className="w-4 h-4 text-[#C5A059]" />
             </button>
           )}

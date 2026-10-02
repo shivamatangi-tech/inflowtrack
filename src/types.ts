@@ -149,7 +149,7 @@ export type TrendViewMode = 'daily' | 'monthly';
 
 export type GoalsTimeframe = 'month' | 'year' | 'alltime';
 
-export type AppViewTab = 'dashboard' | 'goals';
+export type AppViewTab = 'dashboard' | 'goals' | 'calculator';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -167,7 +167,7 @@ export interface SpreadsheetInfo {
   ownerUid?: string;
 }
 
-export type MobileTab = 'home' | 'goals' | 'add' | 'analysis' | 'settings';
+export type MobileTab = 'home' | 'goals' | 'add' | 'calc' | 'analysis' | 'settings';
 
 export interface RecurringTemplate {
   id: string;

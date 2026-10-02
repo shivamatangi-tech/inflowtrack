@@ -23,14 +23,6 @@ import {
   Sun,
   Moon,
   Monitor,
-  Target,
-  IndianRupee,
-  CheckCircle2,
-  AlertCircle,
-  Loader2,
-  PiggyBank,
-  ShieldCheck,
-  Check,
   Sliders,
 } from 'lucide-react';
 import { CategoryData, SpreadsheetInfo, ThemeMode } from '../types';
@@ -42,11 +34,9 @@ import {
 } from '../utils/targets';
 import { updateBudgetsInSheet } from '../services/sheets';
 import { getFreshAuthToken } from '../services/firebase';
-import { formatINR } from '../utils/formatters';
 import { SheetsSyncCard } from './SheetsSyncCard';
 import { QuickAuthCard } from './QuickAuthCard';
-import { VaultProtectionCard } from './VaultProtectionCard';
-import { TaxonomyCard } from './TaxonomyCard';
+import { UnifiedSettingsCard } from './UnifiedSettingsCard';
 
 interface SettingsViewProps {
   sheetInfo?: SpreadsheetInfo | null;
@@ -206,133 +196,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 3. FINANCIAL TARGETS & BUDGETS                                            */}
+      {/* 3. UNIFIED SETTINGS: TARGETS, VAULT PROTECTION & TAXONOMY (SINGLE CARD)   */}
       {/* ========================================================================= */}
-      <div className="bg-white dark:bg-[#161614] rounded-2xl p-4 sm:p-6 border border-[#E5E0D4] dark:border-[#282622] shadow-2xs transition-colors space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] text-[#8E7952] dark:text-[#C5A059] flex items-center justify-center shrink-0">
-            <Target className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="font-display text-lg font-semibold text-[#141412] dark:text-[#F6F5F0] tracking-tight">
-              Financial Targets & Budgets
-            </h2>
-            <p className="text-xs text-[#78746B] dark:text-[#9E9B92]">
-              Set benchmark reserves for Savings and Emergency Fund fulfillment
-            </p>
-          </div>
-        </div>
-
-        {targetSuccess && (
-          <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2 font-medium">
-            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-            <span>{targetSuccess}</span>
-          </div>
-        )}
-
-        {targetError && (
-          <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-800 dark:text-rose-300 flex items-center gap-2 font-medium">
-            <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-            <span>{targetError}</span>
-          </div>
-        )}
-
-        <form onSubmit={handleSaveTargets} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Savings Target */}
-            <div className="space-y-1.5">
-              <label
-                htmlFor="savings-target-input"
-                className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] flex items-center gap-1.5"
-              >
-                <PiggyBank className="w-3.5 h-3.5 text-[#C5A059]" />
-                <span>Savings Target (INR)</span>
-              </label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[#78746B] dark:text-[#9E9B92]">
-                  ₹
-                </span>
-                <input
-                  id="savings-target-input"
-                  type="number"
-                  min="0"
-                  step="1000"
-                  value={savingsInput}
-                  onChange={(e) => setSavingsInput(e.target.value)}
-                  className="w-full min-h-[42px] pl-8 pr-3.5 py-2 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
-                />
-              </div>
-              <p className="text-[10px] text-[#78746B] dark:text-[#9E9B92]">
-                Current target: {formatINR(parseFloat(savingsInput) || 0)}
-              </p>
-            </div>
-
-            {/* Emergency Fund Target */}
-            <div className="space-y-1.5">
-              <label
-                htmlFor="emergency-target-input"
-                className="text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] flex items-center gap-1.5"
-              >
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                <span>Emergency Fund Target (INR)</span>
-              </label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[#78746B] dark:text-[#9E9B92]">
-                  ₹
-                </span>
-                <input
-                  id="emergency-target-input"
-                  type="number"
-                  min="0"
-                  step="1000"
-                  value={emergencyInput}
-                  onChange={(e) => setEmergencyInput(e.target.value)}
-                  className="w-full min-h-[42px] pl-8 pr-3.5 py-2 rounded-xl bg-[#F6F5F0] dark:bg-[#22211D] border border-[#E5E0D4] dark:border-[#2C2A25] text-xs font-semibold text-[#141412] dark:text-[#F6F5F0] focus:outline-none focus:border-[#C5A059]"
-                />
-              </div>
-              <p className="text-[10px] text-[#78746B] dark:text-[#9E9B92]">
-                Current target: {formatINR(parseFloat(emergencyInput) || 0)}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-1">
-            <button
-              type="submit"
-              disabled={isSavingTargets}
-              className="min-h-[42px] px-5 py-2 bg-[#141412] hover:bg-[#262521] dark:bg-[#C5A059] dark:hover:bg-[#D1AF6A] text-[#F6F5F0] dark:text-[#111110] text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {isSavingTargets ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Check className="w-3.5 h-3.5" />
-              )}
-              <span>{isSavingTargets ? 'Saving Targets...' : 'Save Targets'}</span>
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* 4. VAULT PROTECTION (PIN & INACTIVITY)                                    */}
-      {/* ========================================================================= */}
-      <VaultProtectionCard
+      <UnifiedSettingsCard
+        categories={categories}
+        savingsInput={savingsInput}
+        setSavingsInput={setSavingsInput}
+        emergencyInput={emergencyInput}
+        setEmergencyInput={setEmergencyInput}
+        handleSaveTargets={handleSaveTargets}
+        isSavingTargets={isSavingTargets}
+        targetSuccess={targetSuccess}
+        targetError={targetError}
         isUnlocked={isUnlocked}
         onOpenUnlockModal={onOpenUnlockModal}
         onOpenChangePinModal={onOpenChangePinModal}
-      />
-
-      {/* ========================================================================= */}
-      {/* 5. GOOGLE SHEETS TAXONOMY                                                 */}
-      {/* ========================================================================= */}
-      <TaxonomyCard
-        categories={categories}
         onAddCategory={onAddCategory}
         onRefresh={onRefresh}
       />
 
       {/* ========================================================================= */}
-      {/* 6. QUICK AUTHENTICATION & ACCOUNT PROFILE                                 */}
+      {/* 4. QUICK AUTHENTICATION & ACCOUNT PROFILE                                 */}
       {/* ========================================================================= */}
       <QuickAuthCard
         userEmail={userEmail}
